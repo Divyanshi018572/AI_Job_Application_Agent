@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { cn } from "@/lib/utils"
 import {
   Award,
   Briefcase,
@@ -12,6 +13,7 @@ import {
   Plus,
   Save,
   Sparkles,
+  Target,
   Trash2,
   User,
 } from "lucide-react"
@@ -49,6 +51,12 @@ const INITIAL_PROFILE: ParsedResume = {
   education: [],
   projects: [],
   certifications: [],
+  careerPreferences: {
+    preferredLocations: "",
+    noticePeriod: "Immediate",
+    experienceLevel: "Experienced",
+    jobTypes: ["Full-time"],
+  },
 }
 
 export function ProfileEditor() {
@@ -60,6 +68,18 @@ export function ProfileEditor() {
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null)
 
   const [newSkill, setNewSkill] = React.useState<string>("")
+
+  type TabKey =
+    | "personal"
+    | "summary"
+    | "skills"
+    | "experience"
+    | "education"
+    | "projects"
+    | "certifications"
+    | "preferences"
+
+  const [activeTab, setActiveTab] = React.useState<TabKey>("personal")
 
   // Fetch profile from backend on mount
   React.useEffect(() => {
@@ -117,6 +137,30 @@ export function ProfileEditor() {
                   : Array.isArray(parsed.certifications)
                   ? parsed.certifications
                   : [],
+              careerPreferences: {
+                preferredLocations:
+                  p.career_preferences?.preferredLocations ||
+                  parsed.careerPreferences?.preferredLocations ||
+                  p.location ||
+                  "",
+                noticePeriod:
+                  p.career_preferences?.noticePeriod ||
+                  parsed.careerPreferences?.noticePeriod ||
+                  parsed.careerPreferences?.availability ||
+                  "Immediate",
+                experienceLevel:
+                  p.career_preferences?.experienceLevel ||
+                  parsed.careerPreferences?.experienceLevel ||
+                  (Array.isArray(parsed.workExperience) && parsed.workExperience.length > 0
+                    ? "Experienced"
+                    : "Fresher"),
+                jobTypes:
+                  Array.isArray(p.career_preferences?.jobTypes) && p.career_preferences.jobTypes.length > 0
+                    ? p.career_preferences.jobTypes
+                    : Array.isArray(parsed.careerPreferences?.jobTypes) && parsed.careerPreferences.jobTypes.length > 0
+                    ? parsed.careerPreferences.jobTypes
+                    : ["Full-time"],
+              },
             })
           }
         }
@@ -150,6 +194,7 @@ export function ProfileEditor() {
           education: profileData.education,
           projects: profileData.projects,
           certifications: profileData.certifications,
+          careerPreferences: profileData.careerPreferences,
           links: profileData.profile.links,
           onboarding_completed: true,
         }),
@@ -236,7 +281,63 @@ export function ProfileEditor() {
         </div>
       )}
 
+      {/* Main Two-Column Layout: Vertical Navigation Sidebar Left, Active Card Right */}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-4">
+        {/* Left Column: Vertical Navigation Tabs */}
+        <div className="lg:col-span-1">
+          <div className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+            {(
+              [
+                { id: "personal", label: "Personal Details", icon: User },
+                { id: "summary", label: "Summary", icon: Sparkles },
+                { id: "skills", label: "Skills", icon: Award, count: profileData.skills?.length || 0 },
+                { id: "experience", label: "Experience", icon: Briefcase, count: profileData.workExperience?.length || 0 },
+                { id: "education", label: "Education", icon: GraduationCap, count: profileData.education?.length || 0 },
+                { id: "projects", label: "Projects", icon: FolderGit2, count: profileData.projects?.length || 0 },
+                { id: "certifications", label: "Certifications", icon: Award, count: profileData.certifications?.length || 0 },
+                { id: "preferences", label: "Career Preferences", icon: Target },
+              ] as const
+            ).map((tab) => {
+              const Icon = tab.icon
+              const isActive = activeTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as TabKey)}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-3.5 py-3 text-sm font-semibold transition-all cursor-pointer text-left",
+                    isActive
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                  )}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span>{tab.label}</span>
+                  </span>
+                  {"count" in tab && tab.count !== undefined && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold",
+                        isActive
+                          ? "bg-indigo-700 text-white"
+                          : "bg-slate-100 text-slate-700"
+                      )}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Right Column: Active Category Content */}
+        <div className="lg:col-span-3 space-y-6">
       {/* SECTION 1: Personal Details */}
+      {activeTab === "personal" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -369,10 +470,22 @@ export function ProfileEditor() {
               className="border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
             />
           </div>
+          <div className="flex justify-end border-t border-slate-100 p-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("summary")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Professional Summary →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 2: Executive Summary */}
+      {activeTab === "summary" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -392,10 +505,30 @@ export function ProfileEditor() {
             placeholder="Summarize your career journey, primary strengths, and domain achievements..."
             className="border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 leading-relaxed"
           />
+          <div className="flex justify-between border-t border-slate-100 p-4 mt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("personal")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Personal Details
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("skills")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Core Skills →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 3: Core Skills */}
+      {activeTab === "skills" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -444,10 +577,30 @@ export function ProfileEditor() {
               ))
             )}
           </div>
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("summary")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Professional Summary
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("experience")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Work Experience →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 4: Work Experience */}
+      {activeTab === "experience" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -574,10 +727,30 @@ export function ProfileEditor() {
               </div>
             </div>
           ))}
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("skills")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Core Skills
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("education")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Education →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 5: Education */}
+      {activeTab === "education" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -692,10 +865,30 @@ export function ProfileEditor() {
               </div>
             </div>
           ))}
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("experience")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Work Experience
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("projects")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Projects →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 6: Projects */}
+      {activeTab === "projects" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -824,10 +1017,30 @@ export function ProfileEditor() {
               </div>
             </div>
           ))}
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("education")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Education
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("certifications")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Certifications →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
 
       {/* SECTION 7: Certifications */}
+      {activeTab === "certifications" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
@@ -946,8 +1159,161 @@ export function ProfileEditor() {
               </div>
             </div>
           ))}
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("projects")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Projects
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveTab("preferences")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Career Preferences →
+            </Button>
+          </div>
         </CardContent>
       </Card>
+      )}
+
+      {/* SECTION 8: Career Preferences */}
+      {activeTab === "preferences" && (
+      <Card className="border border-slate-200 bg-white shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
+            <Target className="h-5 w-5 text-indigo-600" /> Career Preferences
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label className="text-slate-700 font-semibold">Preferred Location(s)</Label>
+              <Input
+                value={profileData.careerPreferences?.preferredLocations || ""}
+                onChange={(e) =>
+                  setProfileData({
+                    ...profileData,
+                    careerPreferences: {
+                      ...(profileData.careerPreferences || {}),
+                      preferredLocations: e.target.value,
+                    },
+                  })
+                }
+                placeholder="e.g. Remote, Bangalore, New York, San Francisco"
+                className="border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+              />
+              <p className="text-xs text-slate-500">Enter target cities or remote working preference</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-slate-700 font-semibold">Immediate Joining / Notice Period</Label>
+              <select
+                value={profileData.careerPreferences?.noticePeriod || "Immediate"}
+                onChange={(e) =>
+                  setProfileData({
+                    ...profileData,
+                    careerPreferences: {
+                      ...(profileData.careerPreferences || {}),
+                      noticePeriod: e.target.value,
+                    },
+                  })
+                }
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="Immediate">Immediate Joining / 0 Days</option>
+                <option value="15 Days">15 Days Notice</option>
+                <option value="30 Days">30 Days Notice</option>
+                <option value="60 Days">60 Days Notice</option>
+                <option value="90 Days">90 Days Notice</option>
+                <option value="Serving Notice Period">Currently Serving Notice Period</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-slate-700 font-semibold">Experience Level</Label>
+              <select
+                value={profileData.careerPreferences?.experienceLevel || "Experienced"}
+                onChange={(e) =>
+                  setProfileData({
+                    ...profileData,
+                    careerPreferences: {
+                      ...(profileData.careerPreferences || {}),
+                      experienceLevel: e.target.value,
+                    },
+                  })
+                }
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="Experienced">Experienced Professional</option>
+                <option value="Fresher">Fresher / Entry-Level</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-slate-700 font-semibold">Preferred Job Type</Label>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {["Full-time", "Remote", "Contract", "Internship", "Part-time"].map((type) => {
+                  const currentTypes = profileData.careerPreferences?.jobTypes || ["Full-time"]
+                  const isSelected = currentTypes.includes(type)
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => {
+                        const updated = isSelected
+                          ? currentTypes.filter((t) => t !== type)
+                          : [...currentTypes, type]
+                        setProfileData({
+                          ...profileData,
+                          careerPreferences: {
+                            ...(profileData.careerPreferences || {}),
+                            jobTypes: updated.length > 0 ? updated : ["Full-time"],
+                          },
+                        })
+                      }}
+                      className={cn(
+                        "rounded-full px-3 py-1.5 text-xs font-semibold border transition-all cursor-pointer",
+                        isSelected
+                          ? "border-indigo-600 bg-indigo-50 text-indigo-700"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                      )}
+                    >
+                      {type}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("certifications")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Certifications
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveProfile}
+              disabled={isSaving}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold cursor-pointer"
+            >
+              <Save className="mr-2 h-4 w-4" /> Save All Changes
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      )}
+        </div>
+      </div>
     </div>
   )
 }

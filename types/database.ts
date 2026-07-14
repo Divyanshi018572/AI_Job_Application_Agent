@@ -62,6 +62,7 @@ export type Database = {
           projects: Json
           certifications: Json
           links: Json
+          career_preferences: Json | null
           updated_at: string
           user_id: string
         }
@@ -81,6 +82,7 @@ export type Database = {
           projects?: Json
           certifications?: Json
           links?: Json
+          career_preferences?: Json | null
           updated_at?: string
           user_id: string
         }
@@ -100,6 +102,7 @@ export type Database = {
           projects?: Json
           certifications?: Json
           links?: Json
+          career_preferences?: Json | null
           updated_at?: string
           user_id?: string
         }

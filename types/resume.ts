@@ -45,8 +45,11 @@ export interface CertificationItem {
 
 export interface CareerPreferencesItem {
   targetLocations?: string[]
+  preferredLocations?: string
   jobTypes?: string[]
   availability?: string
+  noticePeriod?: string
+  experienceLevel?: "Fresher" | "Experienced" | string
   expectedSalary?: string
 }
 

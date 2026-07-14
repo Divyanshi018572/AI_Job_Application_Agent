@@ -63,6 +63,7 @@ export async function PATCH(request: Request) {
     "projects",
     "certifications",
     "links",
+    "career_preferences",
     "onboarding_completed",
   ]
 
@@ -83,6 +84,7 @@ export async function PATCH(request: Request) {
     if (body.parsedData.education !== undefined) updateData.education = body.parsedData.education
     if (body.parsedData.projects !== undefined) updateData.projects = body.parsedData.projects
     if (body.parsedData.certifications !== undefined) updateData.certifications = body.parsedData.certifications
+    if (body.parsedData.careerPreferences !== undefined) updateData.career_preferences = body.parsedData.careerPreferences
   }
 
   for (const field of allowedFields) {
@@ -91,12 +93,24 @@ export async function PATCH(request: Request) {
     }
   }
 
-  const { data: updatedProfile, error: updateError } = await supabase
+  let { data: updatedProfile, error: updateError } = await supabase
     .from("profiles")
     .update(updateData)
     .eq("id", user.id)
     .select()
     .single()
+
+  if (updateError && updateError.message?.includes("career_preferences")) {
+    delete updateData.career_preferences
+    const retry = await supabase
+      .from("profiles")
+      .update(updateData)
+      .eq("id", user.id)
+      .select()
+      .single()
+    updatedProfile = retry.data
+    updateError = retry.error
+  }
 
   if (updateError) {
     return NextResponse.json(
