@@ -59,6 +59,7 @@ export interface ParsedResume {
     email?: string
     phone?: string
     location?: string
+    avatarUrl?: string
     links?: LinksObject
   }
   summary: string

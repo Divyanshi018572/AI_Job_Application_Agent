@@ -14,8 +14,11 @@ import {
   Save,
   Sparkles,
   Target,
+  Trophy,
   Trash2,
+  Upload,
   User,
+  Camera,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -23,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import type {
   CertificationItem,
   EducationItem,
@@ -37,6 +41,7 @@ const INITIAL_PROFILE: ParsedResume = {
     email: "",
     phone: "",
     location: "",
+    avatarUrl: "",
     links: {
       linkedin: "",
       github: "",
@@ -51,6 +56,7 @@ const INITIAL_PROFILE: ParsedResume = {
   education: [],
   projects: [],
   certifications: [],
+  achievements: [],
   careerPreferences: {
     preferredLocations: "",
     noticePeriod: "Immediate",
@@ -66,8 +72,11 @@ export function ProfileEditor() {
   const [isSaving, setIsSaving] = React.useState<boolean>(false)
   const [saveSuccess, setSaveSuccess] = React.useState<boolean>(false)
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null)
+  const [isUploadingAvatar, setIsUploadingAvatar] = React.useState<boolean>(false)
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const [newSkill, setNewSkill] = React.useState<string>("")
+  const [newAchievement, setNewAchievement] = React.useState<string>("")
 
   type TabKey =
     | "personal"
@@ -77,6 +86,7 @@ export function ProfileEditor() {
     | "education"
     | "projects"
     | "certifications"
+    | "achievements"
     | "preferences"
 
   const [activeTab, setActiveTab] = React.useState<TabKey>("personal")
@@ -98,6 +108,7 @@ export function ProfileEditor() {
                 email: parsed.profile?.email || "",
                 phone: p.phone || parsed.profile?.phone || "",
                 location: p.location || parsed.profile?.location || "",
+                avatarUrl: p.avatar_url || parsed.profile?.avatarUrl || "",
                 links: {
                   linkedin: p.links?.linkedin || parsed.profile?.links?.linkedin || "",
                   github: p.links?.github || parsed.profile?.links?.github || "",
@@ -136,6 +147,12 @@ export function ProfileEditor() {
                   ? p.certifications
                   : Array.isArray(parsed.certifications)
                   ? parsed.certifications
+                  : [],
+              achievements:
+                Array.isArray(p.achievements) && p.achievements.length > 0
+                  ? p.achievements
+                  : Array.isArray(parsed.achievements)
+                  ? parsed.achievements
                   : [],
               careerPreferences: {
                 preferredLocations:
@@ -186,6 +203,7 @@ export function ProfileEditor() {
         body: JSON.stringify({
           parsedData: profileData,
           full_name: profileData.profile.fullName,
+          avatar_url: profileData.profile.avatarUrl,
           phone: profileData.profile.phone,
           location: profileData.profile.location,
           summary: profileData.summary,
@@ -194,6 +212,7 @@ export function ProfileEditor() {
           education: profileData.education,
           projects: profileData.projects,
           certifications: profileData.certifications,
+          achievements: profileData.achievements,
           careerPreferences: profileData.careerPreferences,
           links: profileData.profile.links,
           onboarding_completed: true,
@@ -214,6 +233,78 @@ export function ProfileEditor() {
     }
   }
 
+  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsUploadingAvatar(true)
+    setErrorMsg(null)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+
+      const res = await fetch("/api/profile/avatar", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || "Failed to upload profile picture")
+      }
+
+      const data = await res.json()
+      if (data.url) {
+        setProfileData((prev) => ({
+          ...prev,
+          profile: {
+            ...prev.profile,
+            avatarUrl: data.url,
+          },
+        }))
+        setSaveSuccess(true)
+        setTimeout(() => setSaveSuccess(false), 3000)
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to upload image. Please try again.")
+    } finally {
+      setIsUploadingAvatar(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""
+      }
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    setIsUploadingAvatar(true)
+    try {
+      const updatedProfile = {
+        ...profileData,
+        profile: {
+          ...profileData.profile,
+          avatarUrl: "",
+        },
+      }
+      setProfileData(updatedProfile)
+
+      await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          avatar_url: "",
+          parsedData: updatedProfile,
+        }),
+      })
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 3000)
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to remove image.")
+    } finally {
+      setIsUploadingAvatar(false)
+    }
+  }
+
   function handleAddSkill(e?: React.FormEvent) {
     if (e) e.preventDefault()
     if (!newSkill.trim()) return
@@ -224,6 +315,19 @@ export function ProfileEditor() {
       })
     }
     setNewSkill("")
+  }
+
+  function handleAddAchievement(e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    if (!newAchievement.trim()) return
+    const currentAchievements = profileData.achievements || []
+    if (!currentAchievements.includes(newAchievement.trim())) {
+      setProfileData({
+        ...profileData,
+        achievements: [...currentAchievements, newAchievement.trim()],
+      })
+    }
+    setNewAchievement("")
   }
 
   if (isLoading) {
@@ -241,13 +345,21 @@ export function ProfileEditor() {
     <div className="space-y-6">
       {/* Header Banner */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            Profile Information
-          </h2>
-          <p className="text-sm text-slate-600">
-            Review and edit your parsed resume data below.
-          </p>
+        <div className="flex items-center gap-4">
+          <Avatar className="size-14 border-2 border-indigo-200 shadow-sm shrink-0">
+            <AvatarImage src={profileData.profile.avatarUrl || ""} alt={profileData.profile.fullName || "Profile"} />
+            <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white font-bold text-lg">
+              {(profileData.profile.fullName || "U").slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+              Profile Information
+            </h2>
+            <p className="text-sm text-slate-600">
+              Review and edit your parsed resume data below.
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -295,6 +407,7 @@ export function ProfileEditor() {
                 { id: "education", label: "Education", icon: GraduationCap, count: profileData.education?.length || 0 },
                 { id: "projects", label: "Projects", icon: FolderGit2, count: profileData.projects?.length || 0 },
                 { id: "certifications", label: "Certifications", icon: Award, count: profileData.certifications?.length || 0 },
+                { id: "achievements", label: "Achievements", icon: Trophy, count: profileData.achievements?.length || 0 },
                 { id: "preferences", label: "Career Preferences", icon: Target },
               ] as const
             ).map((tab) => {
@@ -345,6 +458,98 @@ export function ProfileEditor() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* Interactive Profile Picture Manager */}
+          <div className="md:col-span-2 flex flex-col sm:flex-row items-center gap-6 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/60 via-white to-violet-50/40 p-6 shadow-sm">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={handleAvatarFileChange}
+              className="hidden"
+            />
+
+            {/* Clickable Circle Avatar */}
+            <div
+              onClick={() => !isUploadingAvatar && fileInputRef.current?.click()}
+              className={cn(
+                "group relative flex shrink-0 cursor-pointer items-center justify-center rounded-full transition-all duration-200 focus:outline-none",
+                isUploadingAvatar ? "opacity-75 pointer-events-none" : "hover:ring-4 hover:ring-indigo-300 hover:scale-105"
+              )}
+              title="Click to select image from computer"
+            >
+              <Avatar className="size-24 border-4 border-white shadow-md">
+                <AvatarImage src={profileData.profile.avatarUrl || ""} alt={profileData.profile.fullName || "Avatar"} className="object-cover" />
+                <AvatarFallback className="bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-700 text-white font-extrabold text-3xl">
+                  {(profileData.profile.fullName || "U").slice(0, 2).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+
+              {/* Camera Icon Overlay on Hover / Loading overlay */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-full bg-slate-900/60 opacity-0 transition-opacity duration-200 group-hover:opacity-100 text-white gap-1">
+                {isUploadingAvatar ? (
+                  <Loader2 className="size-6 animate-spin text-white" />
+                ) : (
+                  <>
+                    <Camera className="size-6 text-white" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Change</span>
+                  </>
+                )}
+              </div>
+
+              {/* Small badge overlay */}
+              {!isUploadingAvatar && (
+                <div className="absolute bottom-0 right-0 rounded-full border-2 border-white bg-indigo-600 p-1.5 text-white shadow-sm transition-transform group-hover:scale-110">
+                  <Camera className="size-3.5" />
+                </div>
+              )}
+            </div>
+
+            {/* Controls and Information */}
+            <div className="flex-1 space-y-3 text-center sm:text-left w-full">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center justify-center sm:justify-start gap-2">
+                  Profile Picture
+                  {isUploadingAvatar && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                      <Loader2 className="size-3 animate-spin" /> Uploading...
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Click the circle photo or button below to select an image right from your system files (`.jpg`, `.png`, `.webp`).
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5 pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingAvatar}
+                  className="bg-white hover:bg-indigo-50 hover:text-indigo-700 border-indigo-200 text-indigo-600 font-semibold shadow-2xs transition-all cursor-pointer"
+                >
+                  <Upload className="size-4 mr-1.5" />
+                  {profileData.profile.avatarUrl ? "Update Picture" : "Select from Computer"}
+                </Button>
+
+                {profileData.profile.avatarUrl ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRemoveAvatar}
+                    disabled={isUploadingAvatar}
+                    className="border-red-200 bg-white text-red-600 hover:bg-red-50 hover:text-red-700 font-medium transition-all cursor-pointer"
+                  >
+                    <Trash2 className="size-4 mr-1.5" />
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold text-slate-700">
               Full Name
@@ -1170,6 +1375,89 @@ export function ProfileEditor() {
             </Button>
             <Button
               type="button"
+              onClick={() => setActiveTab("achievements")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              Next: Achievements →
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      )}
+
+      {/* SECTION 8: Achievements */}
+      {activeTab === "achievements" && (
+      <Card className="border border-slate-200 bg-white shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
+            <Trophy className="h-5 w-5 text-indigo-600" /> Key Achievements & Awards
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <form onSubmit={handleAddAchievement} className="flex gap-2">
+            <Input
+              value={newAchievement}
+              onChange={(e) => setNewAchievement(e.target.value)}
+              placeholder="e.g. Won 1st place in National AI Hackathon 2024 among 500+ teams"
+              className="border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+            />
+            <Button
+              type="submit"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-5 cursor-pointer shrink-0"
+            >
+              <Plus className="mr-1.5 h-4 w-4" /> Add Achievement
+            </Button>
+          </form>
+
+          <div className="space-y-3 pt-2">
+            {!profileData.achievements || profileData.achievements.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center bg-slate-50/50">
+                <Trophy className="mx-auto h-8 w-8 text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-600">No achievements added yet</p>
+                <p className="text-xs text-slate-400 mt-1">Highlight major awards, scholarships, competitions won, or notable milestones.</p>
+              </div>
+            ) : (
+              profileData.achievements.map((ach, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 text-sm font-medium text-slate-800 transition-all hover:bg-slate-100/70"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 font-bold text-xs">
+                      {idx + 1}
+                    </div>
+                    <span className="leading-relaxed">{ach}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setProfileData({
+                        ...profileData,
+                        achievements: profileData.achievements?.filter((_, i) => i !== idx) || [],
+                      })
+                    }
+                    className="text-slate-400 hover:text-red-600 p-1 rounded-lg hover:bg-red-50 font-bold transition-colors cursor-pointer shrink-0"
+                    title="Remove achievement"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
+            <Button
+              type="button"
+              onClick={() => setActiveTab("certifications")}
+              variant="outline"
+              className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
+            >
+              ← Prev: Certifications
+            </Button>
+            <Button
+              type="button"
               onClick={() => setActiveTab("preferences")}
               variant="outline"
               className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
@@ -1181,7 +1469,7 @@ export function ProfileEditor() {
       </Card>
       )}
 
-      {/* SECTION 8: Career Preferences */}
+      {/* SECTION 9: Career Preferences */}
       {activeTab === "preferences" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader>
@@ -1294,11 +1582,11 @@ export function ProfileEditor() {
           <div className="flex justify-between border-t border-slate-100 p-4 pt-4">
             <Button
               type="button"
-              onClick={() => setActiveTab("certifications")}
+              onClick={() => setActiveTab("achievements")}
               variant="outline"
               className="border-slate-300 bg-white text-slate-700 hover:bg-slate-50 font-semibold cursor-pointer"
             >
-              ← Prev: Certifications
+              ← Prev: Achievements
             </Button>
             <Button
               type="button"

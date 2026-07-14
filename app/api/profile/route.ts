@@ -54,6 +54,7 @@ export async function PATCH(request: Request) {
 
   const allowedFields = [
     "full_name",
+    "avatar_url",
     "phone",
     "location",
     "summary",
@@ -64,6 +65,7 @@ export async function PATCH(request: Request) {
     "certifications",
     "links",
     "career_preferences",
+    "achievements",
     "onboarding_completed",
   ]
 
@@ -74,6 +76,7 @@ export async function PATCH(request: Request) {
   if (body.parsedData) {
     if (body.parsedData.profile) {
       if (body.parsedData.profile.fullName !== undefined) updateData.full_name = body.parsedData.profile.fullName
+      if (body.parsedData.profile.avatarUrl !== undefined) updateData.avatar_url = body.parsedData.profile.avatarUrl
       if (body.parsedData.profile.phone !== undefined) updateData.phone = body.parsedData.profile.phone
       if (body.parsedData.profile.location !== undefined) updateData.location = body.parsedData.profile.location
       if (body.parsedData.profile.links !== undefined) updateData.links = body.parsedData.profile.links
@@ -85,6 +88,7 @@ export async function PATCH(request: Request) {
     if (body.parsedData.projects !== undefined) updateData.projects = body.parsedData.projects
     if (body.parsedData.certifications !== undefined) updateData.certifications = body.parsedData.certifications
     if (body.parsedData.careerPreferences !== undefined) updateData.career_preferences = body.parsedData.careerPreferences
+    if (body.parsedData.achievements !== undefined) updateData.achievements = body.parsedData.achievements
   }
 
   for (const field of allowedFields) {
@@ -100,8 +104,26 @@ export async function PATCH(request: Request) {
     .select()
     .single()
 
-  if (updateError && updateError.message?.includes("career_preferences")) {
-    delete updateData.career_preferences
+  let retries = 0
+  while (
+    updateError &&
+    (updateError.message?.includes("column") ||
+      updateError.message?.includes("schema cache") ||
+      updateError.message?.includes("career_preferences") ||
+      updateError.message?.includes("achievements")) &&
+    retries < 5
+  ) {
+    if (updateError.message?.includes("career_preferences")) {
+      delete updateData.career_preferences
+    } else if (updateError.message?.includes("achievements")) {
+      delete updateData.achievements
+    } else if (updateError.message?.includes("avatar_url")) {
+      delete updateData.avatar_url
+    } else {
+      delete updateData.career_preferences
+      delete updateData.achievements
+    }
+
     const retry = await supabase
       .from("profiles")
       .update(updateData)
@@ -110,6 +132,7 @@ export async function PATCH(request: Request) {
       .single()
     updatedProfile = retry.data
     updateError = retry.error
+    retries++
   }
 
   if (updateError) {
