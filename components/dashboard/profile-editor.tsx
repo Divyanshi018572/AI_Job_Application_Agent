@@ -226,6 +226,9 @@ export function ProfileEditor() {
 
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
+
+      // Notify other components (e.g., header) that profile was updated
+      window.dispatchEvent(new CustomEvent("profile-updated"))
     } catch (err: any) {
       setErrorMsg(err.message || "An error occurred while saving.")
     } finally {
@@ -265,6 +268,9 @@ export function ProfileEditor() {
         }))
         setSaveSuccess(true)
         setTimeout(() => setSaveSuccess(false), 3000)
+
+        // Notify other components (e.g., header) that profile was updated
+        window.dispatchEvent(new CustomEvent("profile-updated"))
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to upload image. Please try again.")
@@ -278,26 +284,35 @@ export function ProfileEditor() {
 
   async function handleRemoveAvatar() {
     setIsUploadingAvatar(true)
-    try {
-      const updatedProfile = {
-        ...profileData,
-        profile: {
-          ...profileData.profile,
-          avatarUrl: "",
-        },
-      }
-      setProfileData(updatedProfile)
+    setErrorMsg(null)
 
-      await fetch("/api/profile", {
+    try {
+      const res = await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          avatar_url: "",
-          parsedData: updatedProfile,
+          avatar_url: null,
         }),
       })
+
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || "Failed to remove avatar")
+      }
+
+      setProfileData((prev) => ({
+        ...prev,
+        profile: {
+          ...prev.profile,
+          avatarUrl: "",
+        },
+      }))
+
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
+
+      // Notify other components (e.g., header) that profile was updated
+      window.dispatchEvent(new CustomEvent("profile-updated"))
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to remove image.")
     } finally {

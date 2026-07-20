@@ -32,14 +32,29 @@ function UserAvatarWidget() {
       }
     }
     void loadUser()
+
+    // Listen for profile updates from ProfileEditor
+    const handleProfileUpdate = () => {
+      void loadUser()
+    }
+
+    window.addEventListener("profile-updated", handleProfileUpdate)
+    return () => {
+      window.removeEventListener("profile-updated", handleProfileUpdate)
+    }
   }, [])
 
   return (
-    <Link href="/dashboard/profile" title="View Profile" className="flex items-center gap-2 transition-opacity hover:opacity-80">
+    <Link href="/dashboard/profile" title="View Profile" aria-label="View profile" className="flex items-center gap-2 transition-opacity hover:opacity-80">
       <Avatar className="size-9 border-2 border-indigo-400/40 shadow-sm">
         <AvatarImage src={avatarUrl} alt={name} />
         <AvatarFallback className="bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white">
-          {(name || "U").slice(0, 2).toUpperCase()}
+          {(() => {
+            if (!name) return "U"
+            const tokens = name.trim().split(/\s+/)
+            if (tokens.length === 1) return tokens[0].charAt(0).toUpperCase()
+            return (tokens[0].charAt(0) + tokens[tokens.length - 1].charAt(0)).toUpperCase()
+          })()}
         </AvatarFallback>
       </Avatar>
     </Link>

@@ -14,5 +14,6 @@
 - **Atomic Checkpoints**: Commit changes in small, logical units (e.g., separate database schema migrations from UI refactors when feasible) so individual features can be cleanly reverted (`git revert <hash>`) if regressions occur.
 
 ## 3. Windows Environment Execution Invariance
-- Due to Windows NUL device redirection restrictions inside the terminal sandbox (`Access is denied`), local `git` commands (`git add`, `git commit`, `git push`) should be executed using `unsandboxed` action permissions or clearly provided to the user to run in PowerShell.
+- Due to Windows NUL device redirection restrictions inside the terminal sandbox (`Access is denied`), local read-only and non-remote-mutating `git` commands (`git add`, `git commit`) may be executed using `unsandboxed` action permissions when necessary.
+- Remote-mutating operations (`git push`, `git fetch --prune`, `git pull --rebase`, etc.) must NOT be executed in unsandboxed mode by default. These commands require explicit user confirmation or should be provided to the user to run manually in PowerShell.
 <!-- END:git-workflow-rules -->
