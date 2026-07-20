@@ -45,8 +45,11 @@ export interface CertificationItem {
 
 export interface CareerPreferencesItem {
   targetLocations?: string[]
+  preferredLocations?: string
   jobTypes?: string[]
   availability?: string
+  noticePeriod?: string
+  experienceLevel?: "Fresher" | "Experienced" | string
   expectedSalary?: string
 }
 
@@ -56,6 +59,7 @@ export interface ParsedResume {
     email?: string
     phone?: string
     location?: string
+    avatarUrl?: string
     links?: LinksObject
   }
   summary: string
