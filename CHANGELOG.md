@@ -135,14 +135,33 @@ Same issue as Session 7: PR #8 (`phase2/2.2-company-token-discovery`, which also
 
 Fixed the same way as before: merged `origin/main` into `dev`. One conflict this time, in `.env.example` (both sides had added a different new env var section) — resolved by keeping both additions (`NVIDIA_API_KEY` and `TAVILY_API_KEY`). Verified after merging: lint (0 errors, 2 known warnings), typecheck clean, all 93 tests passing, production build clean (`641c4e1`).
 
-**If this keeps happening:** it's worth checking whether the repo's default branch on GitHub is set to `main` — that's what a PR's base defaults to unless changed, which would explain why this specific mistake recurs. Changing the GitHub repo's default branch to `dev` (Settings → General → Default branch) would fix it at the source instead of catching it after the fact each time.
+**Confirmed via GitHub API:** the repo's default branch is indeed set to `main` (`default_branch: "main"`). That's the actual root cause of both Session 7's and this session's divergence — recommended the user change it in **Settings → General → Default branch** to `dev`. Not something this session can do without repo-admin access.
+
+## Session 11 — Task 2.3: Job Ingestion Pipeline (jobs/companies schema amended, then wired end to end)
+
+**Branch `phase2/2.3-2.5-jobs-companies-schema`** (pushed, not yet merged):
+
+Before writing the ingestion pipeline, caught a real gap in the Session 10 schema — no way to know which board token a job came from, which both caching and dedup genuinely need. Since that migration hadn't been applied by the user yet, amended it directly (new commit, not a history rewrite, since the branch was already pushed) rather than layering a patch on top of something not yet live:
+- Added a `board_token` column.
+- Switched the dedupe unique index from the plan's literal "company+title+location" text match to `(user_id, job_url)` — every adapter already provides a stable, unique-per-posting URL, and Supabase's REST upsert can only target a plain-column unique constraint anyway (the original `lower(...)`-expression index wouldn't have worked with `on_conflict=`).
+- Added a `(user_id, platform, board_token, fetched_at)` index for the cache-freshness lookup.
+
+Then built the pipeline itself, making `/dashboard/jobs` show real data for the first time:
+- `lib/jobs/concurrency.ts` — `mapWithConcurrency()`, a ~15-line dependency-free concurrency limiter. Caps simultaneous NVIDIA NIM classification calls per board (default 3) instead of firing one unbounded request per job.
+- `lib/jobs/ingest.ts` — `isRecentlyFetched()` (Task 2.3's 6-hour cache check, exported standalone so it's testable in isolation) and `ingestJobsForCompany()` (cache check → adapter fetch → bounded-concurrency classification → upsert). A job whose classification call fails gets a null/unclassified result, not a failed batch.
+- `app/api/jobs/route.ts` (GET, list) and `app/api/jobs/ingest/route.ts` (POST, trigger) — `requireUser()` gate, input validation, and an interim rate limit (15 new boards/user/hour), same reasoning as the resume-upload limit.
+- `components/dashboard/jobs-list-view.tsx` replaces the `BlankPage` placeholder — a "track a company" form (platform + board token; no discovery/curated-list UI exists yet, so this is manual entry for now) plus a list of ingested jobs with classification badges and an apply link.
+- `types/database.ts` — added `jobs`/`companies` table types (note: this repo's `Database` type isn't threaded through the Supabase client anywhere yet, a pre-existing gap unrelated to this change).
+- 21 new tests, including a real timing-based test that verifies the concurrency cap actually holds.
+
+**Explicitly not done, not oversights:** Task 2.2's discovery flow (Tavily search) isn't wired into this UI yet — users type a board token by hand. And this all runs synchronously inside the API route rather than via Inngest, the plan's specified background-job runner, which isn't set up anywhere in this repo yet — a board with many postings means a slower request, not a queued background job.
 
 ---
 
 ## Current Repo State (as of this entry)
 
 - `dev`: has everything through Session 10 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, and 2.4 all merged in. CI green.
-- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 (job classification), which only reached `dev`. `main` and `dev` will diverge again until you either merge `dev` into `main` or fix the default-branch setting above.
-- No open feature branches — all three Phase 2 PRs merged (2.1 and 2.2 into `main`, 2.4 into `dev`, `dev` now reconciled to have all three).
+- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 (job classification), which only reached `dev`. Will diverge again until the default-branch fix above happens or you merge `dev` into `main`.
+- Open branch: `phase2/2.3-2.5-jobs-companies-schema`, pushed, not yet merged — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.3-2.5-jobs-companies-schema`. **Needs the migration applied manually** (Supabase SQL Editor, same process as before) before the ingestion pipeline can actually write anywhere.
 - Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged `v1.0-phase1-complete`.
-- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.4 done and merged. Remaining: Task 2.3 (caching/rate limits) and Task 2.5 (company metadata table + real curated-list seed) — both need a `jobs`/`companies` table, which doesn't exist yet.
+- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.4 done and merged. Task 2.3 (caching + ingestion pipeline) done, pending this PR's merge and the migration being applied. Task 2.5 (company metadata table) has its schema but no seed data or ingestion-time enrichment yet.
