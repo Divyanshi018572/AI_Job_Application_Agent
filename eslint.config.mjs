@@ -27,6 +27,13 @@ const eslintConfig = defineConfig([
     // data on mount.
     rules: {
       "react-hooks/set-state-in-effect": "warn",
+      // Standard convention: a leading underscore marks a parameter as
+      // intentionally unused (e.g. an interface method stub that hasn't
+      // implemented every argument yet — see lib/ats/adapters/*.ts).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
   {
