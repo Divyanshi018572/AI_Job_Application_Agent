@@ -1,5 +1,17 @@
 import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/session"
+import {
+  ALLOWED_AVATAR_TYPES,
+  detectFileType,
+  isAllowedType,
+} from "@/lib/security/file-validation"
+
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+}
 
 export async function POST(request: Request) {
   const { supabase, user, error } = await requireUser()
@@ -35,68 +47,70 @@ export async function POST(request: Request) {
   }
 
   const fileBuffer = Buffer.from(await file.arrayBuffer())
-  const fileExt = file.name.split(".").pop() || "jpg"
-  const sanitizedFileName = `avatar_${Date.now()}.${fileExt}`
-  const filePath = `${user.id}/${sanitizedFileName}`
 
-  let fileUrl: string | null = null
+  // Never trust the client-supplied content type — sniff the real type from
+  // the file's magic bytes and reject anything that isn't an actual image.
+  // (See SECURITY.md Section 3 — this closes the stored-XSS risk where a
+  // malicious SVG/HTML file could previously be uploaded with a spoofed
+  // "image/*" content type.)
+  const detectedType = detectFileType(fileBuffer)
+  if (!isAllowedType(detectedType, ALLOWED_AVATAR_TYPES)) {
+    return NextResponse.json(
+      {
+        error:
+          "Unsupported or unrecognized image format. Allowed: PNG, JPEG, GIF, WEBP.",
+      },
+      { status: 400 }
+    )
+  }
 
-  // 1. Try uploading to "avatars" bucket first
-  const { error: avatarsUploadError } = await supabase.storage
+  const fileExt = EXTENSION_BY_TYPE[detectedType]
+  const filePath = `${user.id}/avatar_${Date.now()}.${fileExt}`
+
+  // Upload to the "avatars" bucket (public, folder-scoped write RLS — see
+  // supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql).
+  // This bucket and its RLS policy are now created together, so the upload
+  // path's first segment (`user.id`) always matches what the policy checks.
+  const { error: uploadError } = await supabase.storage
     .from("avatars")
     .upload(filePath, fileBuffer, {
-      contentType: file.type || "image/jpeg",
+      contentType: detectedType,
       upsert: true,
     })
 
-  if (!avatarsUploadError) {
-    const { data: publicUrlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(filePath)
-    if (publicUrlData?.publicUrl) {
-      fileUrl = publicUrlData.publicUrl
-    }
-  } else {
-    // 2. Fallback to "resumes" bucket if "avatars" bucket doesn't exist
-    const { error: resumesUploadError } = await supabase.storage
-      .from("resumes")
-      .upload(`avatars/${filePath}`, fileBuffer, {
-        contentType: file.type || "image/jpeg",
-        upsert: true,
-      })
-
-    if (!resumesUploadError) {
-      const { data: publicUrlData } = supabase.storage
-        .from("resumes")
-        .getPublicUrl(`avatars/${filePath}`)
-      if (publicUrlData?.publicUrl) {
-        fileUrl = publicUrlData.publicUrl
-      }
-    }
+  if (uploadError) {
+    // Surface the real failure instead of silently falling back to storing
+    // a base64 copy of the image inline in the database (the previous
+    // behavior — see AUDIT_AND_ROADMAP.md Flaw 1).
+    return NextResponse.json(
+      { error: `Avatar upload failed: ${uploadError.message}` },
+      { status: 500 }
+    )
   }
 
-  // 3. If storage upload failed (or bucket not created yet), use data URI so it works instantly without external storage configuration
-  if (!fileUrl) {
-    const base64Str = fileBuffer.toString("base64")
-    fileUrl = `data:${file.type || "image/jpeg"};base64,${base64Str}`
-  }
+  const { data: publicUrlData } = supabase.storage
+    .from("avatars")
+    .getPublicUrl(filePath)
 
-  // Also update profile.avatar_url automatically in database
+  const fileUrl = publicUrlData.publicUrl
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .single()
 
+  const existingParsedData = (profile?.parsed_data ?? {}) as Record<string, unknown>
+  const existingProfileData = (existingParsedData.profile ?? {}) as Record<string, unknown>
   const updatedParsedData = {
-    ...((profile?.parsed_data as any) || {}),
+    ...existingParsedData,
     profile: {
-      ...(((profile?.parsed_data as any)?.profile) || {}),
+      ...existingProfileData,
       avatarUrl: fileUrl,
     },
   }
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("profiles")
     .update({
       avatar_url: fileUrl,
@@ -104,6 +118,13 @@ export async function POST(request: Request) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", user.id)
+
+  if (updateError) {
+    return NextResponse.json(
+      { error: `Avatar uploaded but failed to save to profile: ${updateError.message}` },
+      { status: 500 }
+    )
+  }
 
   return NextResponse.json({
     url: fileUrl,
