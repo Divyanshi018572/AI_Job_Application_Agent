@@ -53,6 +53,30 @@ export interface CareerPreferencesItem {
   expectedSalary?: string
 }
 
+/**
+ * Top-level fields Gemini is asked to score for extraction confidence
+ * (0.0–1.0). Scoped to top-level sections rather than every nested array
+ * item — deep enough to flag "the model wasn't sure about your work
+ * experience," not so granular the model can't fill it in reliably or the
+ * UI can't render it sensibly.
+ */
+export const CONFIDENCE_FIELDS = [
+  "profile.fullName",
+  "profile.email",
+  "profile.phone",
+  "profile.location",
+  "summary",
+  "skills",
+  "workExperience",
+  "education",
+  "projects",
+  "certifications",
+] as const
+
+export type ConfidenceFieldKey = (typeof CONFIDENCE_FIELDS)[number]
+
+export type FieldConfidenceMap = Partial<Record<ConfidenceFieldKey, number>>
+
 export interface ParsedResume {
   profile: {
     fullName?: string
@@ -71,6 +95,8 @@ export interface ParsedResume {
   languages?: string[]
   achievements?: string[]
   careerPreferences?: CareerPreferencesItem
+  /** Per-field extraction confidence, 0.0–1.0. See lib/resume/confidence.ts. */
+  fieldConfidence?: FieldConfidenceMap
 }
 
 export interface ResumeRecord {
