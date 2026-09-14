@@ -10,7 +10,6 @@ import {
   FileText,
   FolderGit2,
   GraduationCap,
-  Languages,
   Sparkles,
   Target,
   User,

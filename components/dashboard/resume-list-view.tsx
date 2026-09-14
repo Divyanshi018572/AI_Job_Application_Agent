@@ -13,10 +13,10 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import type { ResumeRecord } from "@/types/resume"
 
 export function ResumeListView() {
-  const [resumes, setResumes] = React.useState<any[]>([])
+  const [resumes, setResumes] = React.useState<ResumeRecord[]>([])
   const [loading, setLoading] = React.useState(true)
   const [uploading, setUploading] = React.useState(false)
   const [uploadMessage, setUploadMessage] = React.useState("")
@@ -31,8 +31,8 @@ export function ResumeListView() {
       if (!res.ok) throw new Error("Failed to fetch resumes")
       const data = await res.json()
       setResumes(data.resumes || [])
-    } catch (err: any) {
-      setErrorMessage(err.message || "Error loading resumes")
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "Error loading resumes")
     } finally {
       setLoading(false)
     }
@@ -55,8 +55,8 @@ export function ResumeListView() {
       }
 
       setResumes((prev) => prev.filter((item) => item.id !== id))
-    } catch (err: any) {
-      alert(err.message || "Could not delete resume")
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Could not delete resume")
     }
   }
 
@@ -89,8 +89,8 @@ export function ResumeListView() {
       setTimeout(() => setUploadMessage(""), 3000)
 
       await fetchResumes()
-    } catch (err: any) {
-      setErrorMessage(err.message || "Upload failed")
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "Upload failed")
     } finally {
       setUploading(false)
       if (fileInputRef.current) {

@@ -22,7 +22,7 @@ The plan requires Phase 0 (Git workflow, CI, CD, branch protection) to exist **b
 | **0 — Repo/CI/CD bootstrap** | Branch protection, `.github/workflows/ci.yml`, `e2e.yml`, `deploy-staging.yml`, `deploy-production.yml`, 3 Supabase envs, Vitest+Playwright smoke tests | **Not started.** No `.github/` directory at all. No Vitest/Playwright config anywhere in the repo. Only `main`/`dev` branches exist — no `phaseN/task-id` branches, ever. | `find .github` → empty; `find *.test.* *.spec.*` → empty; `git branch -a` → only `main`, `dev` |
 | **1.1 Dashboard Layout** | Collapsible sidebar, nav, footer | **Done.** `app/dashboard/layout.tsx`, `app-sidebar.tsx`, `navigation.ts` all present and wired. | — |
 | **1.2 Authentication** | Google OAuth, email/password, reset flow | **Done** (email/password + reset flow confirmed; Google OAuth callback route exists at `app/auth/callback`, not independently verified end-to-end). | `app/api/auth/*/route.ts` |
-| **1.3 Onboarding & Resume Parsing** | Blocking upload dialog, signed-URL-only storage, per-field confidence scores, editable low-confidence fields | **Partially broken.** Upload dialog and Gemini/Groq parsing work. **No confidence score is ever produced or stored** — `ParsedResume`/`normalizeParsedResume` in `lib/ai/gemini.ts` has no confidence field at all, so the plan's "low-confidence fields pre-flagged and editable" requirement doesn't exist yet. **Resume file links are non-functional** (Flaw 2 below) — violates the plan's explicit "signed URLs only" security note for this task. | `lib/ai/gemini.ts:262-325`, `app/api/resumes/upload/route.ts:76-82` |
+| **1.3 Onboarding & Resume Parsing** | Blocking upload dialog, signed-URL-only storage, per-field confidence scores, editable low-confidence fields | **Done as of `phase1/1.3-resume-confidence-scores`.** Upload dialog, Gemini/Groq parsing, and signed-URL storage all work (Flaw 2 fixed in the stabilization sprint). Gemini now scores 10 top-level fields 0.0–1.0 at extraction time (`lib/ai/gemini.ts`'s `RESUME_EXTRACTION_PROMPT`), normalized/validated in `lib/resume/confidence.ts`, and surfaced as a "Please verify" badge on each section of the profile editor whenever a field's reported score is below 0.6 — already-editable fields, now visibly flagged. Also fixed in this pass: `app/api/profile/avatar/route.ts` was reading/writing a `profiles.parsed_data` column that has never existed in any migration (only `resumes.parsed_data` does), so avatar upload would have failed on the DB write immediately after a successful storage upload. | `lib/resume/confidence.ts`, `lib/ai/gemini.ts`, `components/dashboard/profile-editor.tsx` |
 | **1.4 Security Baseline** | RLS on every table, signed URLs only, manual two-account test | **Partially done.** RLS is correctly enabled and scoped on every table that exists (`profiles`, `job_applications`, `resumes`) — this is the strongest part of the codebase (see Section 4). But: the storage layer has a real policy bug (Flaw 1), there's no evidence a two-account cross-access test was ever run, and there are zero automated RLS tests (pgTAP or otherwise). | `supabase/migrations/20260706130000_initial_schema.sql`, `20260714000000_resume_onboarding_schema.sql` |
 | **2.x — ATS Discovery, matching, caching** | — | **Not started.** `/dashboard/jobs` is a literal `BlankPage` placeholder. No `ATSAdapter` interface, no Inngest, no `jobs`/`companies` tables. | `app/dashboard/jobs/page.tsx` |
 | **3.x — Match scoring & filters** | — | **Not started.** No embeddings, no `pgvector`, no OpenAI integration anywhere in `package.json`. | — |
@@ -131,35 +131,44 @@ This is explicitly what Phase 6.5 ("Hallucination Guardrails") is meant to solve
 ## 5. Revised Roadmap
 
 ### Phase 0.5 — Stabilization Sprint (NEW — do this before touching Phase 2)
-Not in the original plan, but the original plan's own rules (Section 2.9 Definition of Done, Section 5.4's Phase 1 gate) haven't been satisfied yet, so this has to happen first:
+Not in the original plan, but the original plan's own rules (Section 2.9 Definition of Done, Section 5.4's Phase 1 gate) haven't been satisfied yet, so this has to happen first.
 
-1. Rotate the Groq key (Flaw 3); sanitize `.env.example`; fix `.gitignore`.
-2. Fix the avatar bucket + RLS folder mismatch (Flaw 1); add the missing migration.
-3. Switch resume file access to signed URLs (Flaw 2).
-4. Replace the mass-assignment retry loop with an explicit schema-validated update path (Flaw 4).
-5. Add MIME/magic-byte validation to both upload routes (Flaw 5).
-6. Delete or lock down `createAdminClient()` until an Inngest function actually needs it (Flaw 6).
-7. Add an interim per-user rate limit on resume upload/parsing (Flaw 7).
-8. Add prompt-delimiter guardrail to `RESUME_EXTRACTION_PROMPT` (Flaw 8).
-9. Stand up **minimal** CI now — `lint` + `typecheck` + `build` on every PR is enough to start; add Vitest and write tests for the logic that's already in production and untested (`normalizeParsedResume`, `requireUser`, `assertResourceOwner`, the profile update allowlist). Add Playwright once there's a first real user flow worth protecting.
-10. Retroactively adopt the plan's branch-per-task convention starting now: stop committing to `dev` directly, open the next task as `phase1/1.3-fix-resume-links` or similar, and route it through a PR even without a hosted CI runner blocking merge yet.
-11. Commit the three currently-pending files (`.agents/AGENTS.md`, `profile-completeness-card.tsx`, `profile-editor.tsx`) as their own scoped commit.
-12. Run the plan's Phase 1 gate for real: a manual two-account cross-access test, using two live accounts, confirming neither can see the other's profile/resume/application data.
+**Status as of 2026-09-14 (branch `phase0.5/stabilization-sprint`):**
+
+1. ☑ Rotated Groq key placeholder in `.env.example`; fixed `.gitignore` to un-ignore it (Flaw 3). **The real key itself still needs rotating in the Groq console by a human with account access — that step could not be done from this session.**
+2. ☑ Fixed the avatar bucket + RLS folder mismatch (Flaw 1): added `supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql` creating a public `avatars` bucket with folder-scoped write RLS matching the actual upload path; rewrote `app/api/profile/avatar/route.ts` to upload directly there and removed the base64-fallback.
+3. ☑ Switched resume file access to signed URLs (Flaw 2): `app/api/resumes/route.ts` and `app/api/resumes/upload/route.ts` now call `createSignedUrl()` fresh on every read/upload instead of `getPublicUrl()` on the private bucket.
+4. ☑ Replaced the mass-assignment retry loop in `app/api/profile/route.ts` with a single update attempt that surfaces schema-mismatch errors instead of silently dropping fields (Flaw 4).
+5. ☑ Added `lib/security/file-validation.ts` (magic-byte detection) and wired it into both upload routes (Flaw 5).
+6. ☑ Locked down `createAdminClient()` (Flaw 6): added an ESLint `no-restricted-imports` rule blocking it from `app/api/**`, plus a doc comment explaining the boundary.
+7. ☑ Added an interim rate limit (5 uploads/user/hour) to `app/api/resumes/upload/route.ts` (Flaw 7).
+8. ☑ Added an untrusted-data delimiter + instruction to `RESUME_EXTRACTION_PROMPT` in `lib/ai/gemini.ts` (Flaw 8).
+9. ☑ Stood up minimal CI (`.github/workflows/ci.yml`: lint, typecheck, unit-test, build on every PR/push to `main`/`dev`). Added Vitest (`vitest.config.ts`) with 15 passing unit tests covering `detectFileType`/`isAllowedType`, `assertResourceOwner`, and `normalizeParsedResume`. **Playwright/e2e still not added** — deferred until there's a first real user flow worth protecting, per the original note.
+10. ☑ Adopted the branch-per-task convention starting with this sprint: `phase0.5/stabilization-sprint` off `dev`, no direct commits to `dev` since.
+11. ☑ Committed the three previously-pending files (`.agents/AGENTS.md`, `profile-completeness-card.tsx`, `profile-editor.tsx`) as their own scoped commit before this branch was cut.
+12. ☐ **Still open** — the manual two-account cross-access test requires a live Supabase project and two real accounts; it cannot be run from this session. Do this before promoting anything to production.
+
+**Two additional bugs found and fixed while doing this work (not in the original 9 flaws):**
+
+- **`pdf-parse` v2 API break.** `package.json` pins `pdf-parse@^2.4.5`, but the upload route was calling the old v1 API (`(await import("pdf-parse")).default(buffer)` returning `{ text }`). v2 replaced this with a `PDFParse` class (`new PDFParse({ data }).getText()`). The old call always threw, was always silently caught, and `extractedText` was always empty for every PDF resume ever uploaded — meaning the Groq fallback (which requires non-empty `extractedText`) could never trigger for a PDF resume, even though PDFs are presumably the majority of uploads. Fixed in `app/api/resumes/upload/route.ts` to use the real v2 API. This is exactly the class of bug this repo's own `AGENTS.md` warns about ("this is NOT the Next.js you know... read the docs before writing code") — same lesson applies to every dependency, not just Next.js itself.
+- **`middleware.ts` used a deprecated Next.js 16 file convention.** The production build emitted `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` This file is the single gate enforcing every auth rule in `SECURITY.md` Section 6, so it was renamed to `proxy.ts` (exported function renamed `middleware` → `proxy`) per `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`. Confirmed via a from-scratch build (no `.env.local`, placeholder env vars only) that this didn't change behavior. That doc also flags something worth carrying forward: Server Functions aren't separate routes in Proxy's execution chain, so a matcher change can silently stop covering one — auth should never be enforced by Proxy alone once Server Functions are in use.
+
+**Verification run at the end of this sprint (all green):** `npm run lint` (0 errors, 2 deliberately-downgraded warnings — see `eslint.config.mjs` comment on `react-hooks/set-state-in-effect`), `npm run typecheck`, `npm run test:unit` (15/15 passing), `npm run build` (clean, including a build with no `.env.local` to simulate CI).
 
 ### Then — resume the original plan, unchanged in structure
 Once Phase 0.5 is closed:
-- Finish Phase 1.3 properly: add the confidence-score field the plan requires (`ParsedResume` currently has no per-field confidence at all) and make low-confidence fields visibly flagged/editable in the UI.
-- Tag `v1.0-phase1-complete`, then proceed to Phase 2 (ATS integration) exactly as written in `project (1).md` — that plan's Phase 2–8 structure, adapter-interface pattern, and cross-cutting requirements are sound and don't need revision, only a stable foundation under them.
+- ☑ Finish Phase 1.3 properly: add the confidence-score field the plan requires and make low-confidence fields visibly flagged/editable in the UI — done on `phase1/1.3-resume-confidence-scores` (`lib/resume/confidence.ts`, updated `RESUME_EXTRACTION_PROMPT`, "Please verify" badges in `profile-editor.tsx`). Also fixed in the same pass: the avatar route was writing to a `profiles.parsed_data` column that never existed in any migration, which would have broken every avatar upload immediately after a successful storage write.
+- Tag `v1.0-phase1-complete`, then proceed to Phase 2 (ATS integration) exactly as written in `project (1).md` — that plan's Phase 2–8 structure, adapter-interface pattern, and cross-cutting requirements are sound and don't need revision, only a stable foundation under them. **Still blocking the tag:** the manual two-account cross-access test (needs a live Supabase project with two real accounts) and Groq key rotation — both require human/console access this session doesn't have.
 
 ### Task Tracking (replaces Section 14 of the plan, reflects reality)
 
 | Phase | Task | Status |
 |---|---|---|
 | 0 | 0.1–0.5 (repo/CI/CD bootstrap) | ☐ Not started |
-| 0.5 | Stabilization sprint (this document, items 1–12) | ☐ Not started |
+| 0.5 | Stabilization sprint (this document, items 1–12) | ◐ 11/12 done — only the live two-account test and real key rotation remain, both requiring human/console access |
 | 1 | 1.1 Dashboard Layout | ☑ Done |
 | 1 | 1.2 Authentication | ☑ Done |
-| 1 | 1.3 Onboarding & Resume Parsing | ◐ Partial — broken links + missing confidence scoring |
+| 1 | 1.3 Onboarding & Resume Parsing | ☑ Done — confidence scoring, signed URLs, avatar `parsed_data` bug fixed |
 | 1 | 1.4 Security Baseline | ◐ Partial — RLS solid, storage bug, no two-account test run |
 | 2–8 | Everything else | ☐ Not started |
 

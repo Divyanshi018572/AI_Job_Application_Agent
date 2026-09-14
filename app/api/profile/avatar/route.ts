@@ -1,5 +1,17 @@
 import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth/session"
+import {
+  ALLOWED_AVATAR_TYPES,
+  detectFileType,
+  isAllowedType,
+} from "@/lib/security/file-validation"
+
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+}
 
 export async function POST(request: Request) {
   const { supabase, user, error } = await requireUser()
@@ -36,92 +48,58 @@ export async function POST(request: Request) {
 
   const fileBuffer = Buffer.from(await file.arrayBuffer())
 
-  // Validate actual file content using magic bytes
-  function detectImageType(buffer: Buffer): { ext: string; mimeType: string } | null {
-    if (buffer.length < 12) return null
-
-    // PNG: 89 50 4E 47
-    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
-      return { ext: "png", mimeType: "image/png" }
-    }
-
-    // JPEG: FF D8 FF
-    if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
-      return { ext: "jpg", mimeType: "image/jpeg" }
-    }
-
-    // GIF: 47 49 46 38 (GIF8)
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
-      return { ext: "gif", mimeType: "image/gif" }
-    }
-
-    // WEBP: RIFF ... WEBP (bytes 0-3: RIFF, bytes 8-11: WEBP)
-    if (buffer.length >= 12 &&
-        buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
-        buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
-      return { ext: "webp", mimeType: "image/webp" }
-    }
-
-    return null
-  }
-
-  const detectedType = detectImageType(fileBuffer)
-  if (!detectedType) {
+  // Never trust the client-supplied content type — sniff the real type from
+  // the file's magic bytes and reject anything that isn't an actual image.
+  // (See SECURITY.md Section 3 — this closes the stored-XSS risk where a
+  // malicious SVG/HTML file could previously be uploaded with a spoofed
+  // "image/*" content type.)
+  const detectedType = detectFileType(fileBuffer)
+  if (!isAllowedType(detectedType, ALLOWED_AVATAR_TYPES)) {
     return NextResponse.json(
-      { error: "Invalid image file. Only PNG, JPEG, GIF, and WEBP images are allowed." },
+      {
+        error:
+          "Unsupported or unrecognized image format. Allowed: PNG, JPEG, GIF, WEBP.",
+      },
       { status: 400 }
     )
   }
 
-  const sanitizedFileName = `avatar_${Date.now()}.${detectedType.ext}`
-  const filePath = `${user.id}/${sanitizedFileName}`
+  const fileExt = EXTENSION_BY_TYPE[detectedType]
+  const filePath = `${user.id}/avatar_${Date.now()}.${fileExt}`
 
-  let fileUrl: string | null = null
-
-  // 1. Try uploading to "avatars" bucket first
-  const { error: avatarsUploadError } = await supabase.storage
+  // Upload to the "avatars" bucket (public, folder-scoped write RLS — see
+  // supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql).
+  // This bucket and its RLS policy are now created together, so the upload
+  // path's first segment (`user.id`) always matches what the policy checks.
+  const { error: uploadError } = await supabase.storage
     .from("avatars")
     .upload(filePath, fileBuffer, {
-      contentType: detectedType.mimeType,
+      contentType: detectedType,
       upsert: true,
     })
 
-  if (!avatarsUploadError) {
-    const { data: publicUrlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(filePath)
-    if (publicUrlData?.publicUrl) {
-      fileUrl = publicUrlData.publicUrl
-    }
-  } else {
-    // 2. Fallback to "resumes" bucket if "avatars" bucket doesn't exist
-    const { error: resumesUploadError } = await supabase.storage
-      .from("resumes")
-      .upload(`avatars/${filePath}`, fileBuffer, {
-        contentType: detectedType.mimeType,
-        upsert: true,
-      })
-
-    if (!resumesUploadError) {
-      const { data: publicUrlData } = supabase.storage
-        .from("resumes")
-        .getPublicUrl(`avatars/${filePath}`)
-      if (publicUrlData?.publicUrl) {
-        fileUrl = publicUrlData.publicUrl
-      }
-    }
-  }
-
-  // 3. If both storage attempts failed, return error
-  if (!fileUrl) {
-    console.error("Avatar upload failed: both avatars and resumes buckets unavailable")
+  if (uploadError) {
+    // Surface the real failure instead of silently falling back to storing
+    // a base64 copy of the image inline in the database (the previous
+    // behavior — see AUDIT_AND_ROADMAP.md Flaw 1).
+    console.error("Avatar upload failed:", uploadError)
     return NextResponse.json(
-      { error: "Failed to upload avatar. Storage service is unavailable." },
+      { error: `Avatar upload failed: ${uploadError.message}` },
       { status: 500 }
     )
   }
 
-  // Also update profile.avatar_url automatically in database
+  const { data: publicUrlData } = supabase.storage
+    .from("avatars")
+    .getPublicUrl(filePath)
+
+  const fileUrl = publicUrlData.publicUrl
+
+  // `profiles` has no `parsed_data` column — only the `resumes` table does
+  // (supabase/migrations/20260714000000_resume_onboarding_schema.sql). An
+  // earlier version of this route read/wrote `profiles.parsed_data`, which
+  // doesn't exist, so every avatar upload would fail here right after a
+  // successful storage upload. Fixed to only touch real columns.
   const { error: updateError } = await supabase
     .from("profiles")
     .update({
@@ -133,7 +111,7 @@ export async function POST(request: Request) {
   if (updateError) {
     console.error("Failed to update profile avatar_url:", updateError)
     return NextResponse.json(
-      { error: "Failed to update profile with new avatar URL." },
+      { error: `Avatar uploaded but failed to save to profile: ${updateError.message}` },
       { status: 500 }
     )
   }

@@ -3,12 +3,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import {
+  AlertTriangle,
   Award,
   Briefcase,
   Check,
   FolderGit2,
   GraduationCap,
-  Link as LinkIcon,
   Loader2,
   Plus,
   Save,
@@ -28,13 +28,44 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ProfileCompletenessCard } from "@/components/dashboard/profile-completeness-card"
+import { isFieldLowConfidence } from "@/lib/resume/confidence"
 import type {
   CertificationItem,
+  ConfidenceFieldKey,
   EducationItem,
+  FieldConfidenceMap,
   ParsedResume,
   ProjectItem,
   WorkExperienceItem,
 } from "@/types/resume"
+
+/**
+ * Plan requirement (Task 1.3): "low-confidence fields pre-flagged and
+ * editable." Every field this badge appears next to is already editable —
+ * this just tells the user which ones the AI parser wasn't sure about, so
+ * they know where to double-check before relying on the data.
+ */
+function LowConfidenceBadge({
+  fieldConfidence,
+  fields,
+}: {
+  fieldConfidence: FieldConfidenceMap | undefined
+  fields: ConfidenceFieldKey | ConfidenceFieldKey[]
+}) {
+  const fieldList = Array.isArray(fields) ? fields : [fields]
+  const isLow = fieldList.some((field) => isFieldLowConfidence(fieldConfidence, field))
+  if (!isLow) return null
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400"
+      title="The AI parser wasn't fully confident about this section — please review and correct it."
+    >
+      <AlertTriangle className="size-3" />
+      Please verify
+    </span>
+  )
+}
 
 const INITIAL_PROFILE: ParsedResume = {
   profile: {
@@ -179,10 +210,11 @@ export function ProfileEditor() {
                     ? parsed.careerPreferences.jobTypes
                     : ["Full-time"],
               },
+              fieldConfidence: parsed.fieldConfidence,
             })
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to fetch profile:", err)
       } finally {
         setIsLoading(false)
@@ -230,8 +262,8 @@ export function ProfileEditor() {
 
       // Notify other components (e.g., header) that profile was updated
       window.dispatchEvent(new CustomEvent("profile-updated"))
-    } catch (err: any) {
-      setErrorMsg(err.message || "An error occurred while saving.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "An error occurred while saving.")
     } finally {
       setIsSaving(false)
     }
@@ -273,8 +305,8 @@ export function ProfileEditor() {
         // Notify other components (e.g., header) that profile was updated
         window.dispatchEvent(new CustomEvent("profile-updated"))
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to upload image. Please try again.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to upload image. Please try again.")
     } finally {
       setIsUploadingAvatar(false)
       if (fileInputRef.current) {
@@ -314,8 +346,8 @@ export function ProfileEditor() {
 
       // Notify other components (e.g., header) that profile was updated
       window.dispatchEvent(new CustomEvent("profile-updated"))
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to remove image.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to remove image.")
     } finally {
       setIsUploadingAvatar(false)
     }
@@ -478,8 +510,12 @@ export function ProfileEditor() {
       {activeTab === "personal" && (
       <Card className="border border-slate-200 bg-white shadow-sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-lg font-bold text-slate-900">
             <User className="h-5 w-5 text-indigo-600" /> Personal Details & Links
+            <LowConfidenceBadge
+              fieldConfidence={profileData.fieldConfidence}
+              fields={["profile.fullName", "profile.email", "profile.phone", "profile.location"]}
+            />
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -720,6 +756,7 @@ export function ProfileEditor() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <Award className="h-5 w-5 text-indigo-600" /> Professional Summary
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="summary" />
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -763,6 +800,7 @@ export function ProfileEditor() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <Sparkles className="h-5 w-5 text-indigo-600" /> Core Skills
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="skills" />
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -835,6 +873,7 @@ export function ProfileEditor() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <Briefcase className="h-5 w-5 text-indigo-600" /> Work Experience
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="workExperience" />
           </CardTitle>
           <Button
             onClick={() => {
@@ -985,6 +1024,7 @@ export function ProfileEditor() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <GraduationCap className="h-5 w-5 text-indigo-600" /> Education History
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="education" />
           </CardTitle>
           <Button
             onClick={() => {
@@ -1123,6 +1163,7 @@ export function ProfileEditor() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <FolderGit2 className="h-5 w-5 text-indigo-600" /> Projects
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="projects" />
           </CardTitle>
           <Button
             onClick={() => {
@@ -1275,6 +1316,7 @@ export function ProfileEditor() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-lg font-bold text-slate-900">
             <Award className="h-5 w-5 text-indigo-600" /> Certifications & Licenses
+            <LowConfidenceBadge fieldConfidence={profileData.fieldConfidence} fields="certifications" />
           </CardTitle>
           <Button
             onClick={() => {
