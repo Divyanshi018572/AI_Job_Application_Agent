@@ -1,16 +1,18 @@
 import { greenhouseAdapter } from "@/lib/ats/adapters/greenhouse"
+import { leverAdapter } from "@/lib/ats/adapters/lever"
+import { workableAdapter } from "@/lib/ats/adapters/workable"
 import type { ATSAdapter } from "@/lib/ats/types"
 
 /**
  * Platform registry (project plan Section 3). Orchestration code looks an
  * adapter up here by platform name or by URL — it never imports a specific
- * adapter directly. Lever and Workable get added the same way: implement
- * `ATSAdapter` in their own file under lib/ats/adapters/, register here.
+ * adapter directly. Adding platform #4 (e.g. Wellfound, Phase 8) means
+ * writing one new file under lib/ats/adapters/ and one new line here.
  */
 export const ATS_ADAPTERS = {
   greenhouse: greenhouseAdapter,
-  // lever: leverAdapter,       // not yet implemented
-  // workable: workableAdapter, // not yet implemented
+  lever: leverAdapter,
+  workable: workableAdapter,
 } as const satisfies Record<string, ATSAdapter>
 
 export type ATSPlatform = keyof typeof ATS_ADAPTERS
