@@ -174,7 +174,11 @@ Once Phase 0.5 is closed:
 | 1 | 1.3 Onboarding & Resume Parsing | ☑ Done — confidence scoring, signed URLs, avatar `parsed_data` bug fixed |
 | 1 | 1.4 Security Baseline | ☑ Done — RLS solid, storage bug fixed, two-account test passed |
 | 2 | 2.1 ATS API Integration | ☑ Done (pending PR merge) — Greenhouse, Lever, and Workable adapters all implemented and tested |
-| 2 | 2.2–2.5, 3–8 | ☐ Not started |
+| 2 | 2.2 Company Token Discovery | ☑ Done (pending PR merge) — Tavily instead of Brave Search (documented swap) |
+| 2 | 2.3 Caching & Rate Limits | ☐ Not started |
+| 2 | 2.4 Job Classification Pipeline | ☑ Done (pending PR merge) — NVIDIA NIM instead of Anthropic Claude (documented swap) |
+| 2 | 2.5 Company Metadata Table | ☐ Not started |
+| 3–8 | Everything else | ☐ Not started |
 
 ---
 

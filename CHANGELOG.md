@@ -109,11 +109,37 @@ Completed Task 2.1 (ATS API Integration) — the two remaining plan-specified pl
 
 Task 2.1 is now fully done: interface, registry, and all three adapters the plan specifies.
 
+## Session 9 — Task 2.4 (Job Classification) + Task 2.2 (Company Token Discovery)
+
+Two deliberate, documented provider swaps this session, both because the plan's originally-specified providers weren't a good fit for a cost-conscious solo build:
+
+- **NVIDIA NIM instead of Anthropic Claude** for Task 2.4. NIM has a free tier and an OpenAI-compatible API (same shape Groq already uses in this repo).
+- **Tavily instead of Brave Search** for Task 2.2. Brave's free tier requires a card on file; Tavily's doesn't.
+
+**Branch `phase2/2.4-job-classification-pipeline`** (pushed, cut from `dev` before Session 8 merged, so it doesn't include Lever/Workable — no conflict, different files):
+- `lib/ai/nvidia.ts` — OpenAI-compatible NIM client, mirrors `lib/ai/groq.ts`.
+- `lib/jobs/types.ts` / `lib/jobs/classify.ts` — the three classification enums (experienceLevel/employmentType/workMode) as runtime-checkable const arrays, and `classifyJob()`. Any field the model can't determine, or hallucinates a value outside the fixed enum for, comes back `null` — never guessed. 14 new tests.
+- Establishes `lib/jobs/` as the start of the plan's `jobs-matching` domain, separate from `lib/ats/` (fetching).
+
+**Branch `phase2/2.2-company-token-discovery`** (pushed) — this one *does* need Lever/Workable registered (its Workable-subdomain-token test needs all three adapters), so `phase2/2.1-lever-workable-adapters` was merged into it first, cleanly, no conflicts:
+- `lib/search/types.ts` — a `SearchProvider` interface, same swappable-adapter reasoning as `ATSAdapter`.
+- `lib/search/providers/tavily.ts` — real implementation.
+- `lib/ats/curated-companies.ts` — the curated-list structure, deliberately left empty (Task 2.5's job to seed with verified real companies — a wrong guessed token is worse than no data).
+- `lib/ats/discovery.ts` — `discoverCompanyToken()`: curated list first, then search, then extracts a candidate token from each result URL and verifies it with a real call through the existing ATS adapters before accepting it — exactly the plan's "verify token via a live test API call" requirement. A result that fails verification is skipped, not fatal. 15 new tests.
+
+**New env vars needed** (documented in `.env.example`, not yet in your `.env.local`): `NVIDIA_API_KEY` (from build.nvidia.com), `TAVILY_API_KEY` (from tavily.com). Neither is needed for anything already merged — only once these two branches land and get wired into a live ingestion flow.
+
+**Merge order matters:** open/merge `phase2/2.1-lever-workable-adapters` first, then `phase2/2.2-company-token-discovery` (already contains 2.1's commits, so it'll show as already-merged for those, no conflict), then `phase2/2.4-job-classification-pipeline` in either order relative to the others.
+
 ---
 
 ## Current Repo State (as of this entry)
 
 - `dev` and `main`: **in sync** through Session 7, CI green on both. Tag `v1.0-phase1-complete` pushed.
-- Open branch: `phase2/2.1-lever-workable-adapters`, pushed, ready for a PR into `dev`. Auto-generated link: `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.1-lever-workable-adapters`.
+- Open branches, all pushed, none merged yet:
+  - `phase2/2.1-lever-workable-adapters` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.1-lever-workable-adapters`
+  - `phase2/2.2-company-token-discovery` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.2-company-token-discovery`
+  - `phase2/2.4-job-classification-pipeline` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.4-job-classification-pipeline`
 - Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged.
+- Phase 2 (Core Discovery): Tasks 2.1, 2.2, and 2.4 done pending PR merges. Remaining: Task 2.3 (caching/rate limits) and Task 2.5 (company metadata table + real curated-list seed) — both need a `jobs`/`companies` table, which doesn't exist yet.
 - Phase 2 (Core Discovery): Task 2.1 (ATS API Integration) done pending this PR's merge. Remaining for Phase 2: company token discovery (Task 2.2), caching/rate limits (Task 2.3), job classification (Task 2.4), company metadata table (Task 2.5), and a `jobs` table to actually persist what the adapters fetch — none of these need human intervention to build, only to eventually test against real ATS boards.
