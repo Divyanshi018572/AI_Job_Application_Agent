@@ -104,24 +104,41 @@ export async function PATCH(request: Request) {
     .select()
     .single()
 
+  const droppedFields: string[] = []
   let retries = 0
+
+  // Check for schema errors using error codes: 42703 (undefined_column) or schema cache issues
   while (
     updateError &&
-    (updateError.message?.includes("column") ||
-      updateError.message?.includes("schema cache") ||
-      updateError.message?.includes("career_preferences") ||
-      updateError.message?.includes("achievements")) &&
+    (updateError.code === "42703" ||
+     updateError.code === "PGRST204" ||
+     updateError.message?.includes("schema cache")) &&
     retries < 5
   ) {
+    // Parse which field is problematic from error message
+    let fieldToRemove: string | null = null
+
     if (updateError.message?.includes("career_preferences")) {
-      delete updateData.career_preferences
+      fieldToRemove = "career_preferences"
     } else if (updateError.message?.includes("achievements")) {
-      delete updateData.achievements
+      fieldToRemove = "achievements"
     } else if (updateError.message?.includes("avatar_url")) {
-      delete updateData.avatar_url
+      fieldToRemove = "avatar_url"
+    }
+
+    if (fieldToRemove && updateData[fieldToRemove] !== undefined) {
+      delete updateData[fieldToRemove]
+      droppedFields.push(fieldToRemove)
     } else {
-      delete updateData.career_preferences
-      delete updateData.achievements
+      // Fallback: remove both career_preferences and achievements
+      if (updateData.career_preferences !== undefined) {
+        delete updateData.career_preferences
+        droppedFields.push("career_preferences")
+      }
+      if (updateData.achievements !== undefined) {
+        delete updateData.achievements
+        droppedFields.push("achievements")
+      }
     }
 
     const retry = await supabase
@@ -142,5 +159,11 @@ export async function PATCH(request: Request) {
     )
   }
 
-  return NextResponse.json({ profile: updatedProfile })
+  return NextResponse.json({
+    profile: updatedProfile,
+    ...(droppedFields.length > 0 && {
+      warning: `Some fields were not saved due to schema limitations: ${droppedFields.join(", ")}`,
+      droppedFields
+    })
+  })
 }
