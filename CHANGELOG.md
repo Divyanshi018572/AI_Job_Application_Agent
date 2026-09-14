@@ -156,12 +156,15 @@ Then built the pipeline itself, making `/dashboard/jobs` show real data for the 
 
 **Explicitly not done, not oversights:** Task 2.2's discovery flow (Tavily search) isn't wired into this UI yet — users type a board token by hand. And this all runs synchronously inside the API route rather than via Inngest, the plan's specified background-job runner, which isn't set up anywhere in this repo yet — a board with many postings means a slower request, not a queued background job.
 
+**Mid-session merge note:** PR #10 for this branch got merged into `dev` (as `b32ea2a`) while the branch still only had its first commit — before the `board_token` fix and the ingestion pipeline itself were pushed. `dev` briefly had the incomplete schema (no `board_token`, the unusable `lower(...)`-expression dedupe index) and none of the pipeline code. Merged the branch's remaining two commits (`707a979`, `ca2c6ee`) directly into `dev` to close the gap — clean merge, no conflicts, since `dev`'s version of the migration file was a strict ancestor of the branch's later edits. Re-verified after merging: lint clean, typecheck clean, all 109 tests passing, build clean, pushed as `6ab7dab`.
+
 ---
 
 ## Current Repo State (as of this entry)
 
-- `dev`: has everything through Session 10 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, and 2.4 all merged in. CI green.
-- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 (job classification), which only reached `dev`. Will diverge again until the default-branch fix above happens or you merge `dev` into `main`.
-- Open branch: `phase2/2.3-2.5-jobs-companies-schema`, pushed, not yet merged — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.3-2.5-jobs-companies-schema`. **Needs the migration applied manually** (Supabase SQL Editor, same process as before) before the ingestion pipeline can actually write anywhere.
+- `dev`: has everything through Session 11 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, 2.4 merged, and Task 2.3's full ingestion pipeline (schema + `board_token` fix + `lib/jobs/*` + `/api/jobs*` + the jobs dashboard UI) all present and verified. CI green.
+- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 and all of Session 11's ingestion pipeline, which only reached `dev`. Will diverge again until the default-branch fix happens or you merge `dev` into `main`.
+- No open feature branches.
+- **Action needed before the pipeline can write anything:** apply `supabase/migrations/20260914010000_jobs_and_companies_schema.sql` (the *current* version on `dev`, which includes `board_token` — if you already ran an earlier copy of this file, re-check it has `board_token` and the `(user_id, job_url)` dedupe index; add them by hand if not, since Postgres migrations don't reapply automatically) via the Supabase SQL Editor, same process as the avatars bucket migration.
 - Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged `v1.0-phase1-complete`.
-- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.4 done and merged. Task 2.3 (caching + ingestion pipeline) done, pending this PR's merge and the migration being applied. Task 2.5 (company metadata table) has its schema but no seed data or ingestion-time enrichment yet.
+- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.3, 2.4 all done and merged to `dev`. Task 2.5 (company metadata table) has its schema but no seed data or ingestion-time enrichment yet.
