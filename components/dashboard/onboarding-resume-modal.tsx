@@ -147,9 +147,11 @@ export function OnboardingResumeModal() {
         router.push("/dashboard/profile")
         router.refresh()
       }, 1500)
-    } catch (err: any) {
+    } catch (err: unknown) {
       setUploadStatus("error")
-      setErrorMessage(err.message || "An unexpected error occurred.")
+      setErrorMessage(
+        err instanceof Error ? err.message : "An unexpected error occurred."
+      )
     }
   }
 

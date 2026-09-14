@@ -38,6 +38,27 @@ export async function GET() {
   })
 }
 
+interface ProfilePatchBody {
+  parsedData?: {
+    profile?: {
+      fullName?: string
+      avatarUrl?: string
+      phone?: string
+      location?: string
+      links?: unknown
+    }
+    summary?: string
+    skills?: unknown
+    workExperience?: unknown
+    education?: unknown
+    projects?: unknown
+    certifications?: unknown
+    careerPreferences?: unknown
+    achievements?: unknown
+  }
+  [key: string]: unknown
+}
+
 export async function PATCH(request: Request) {
   const { supabase, user, error } = await requireUser()
 
@@ -45,9 +66,9 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: any
+  let body: ProfilePatchBody
   try {
-    body = await request.json()
+    body = (await request.json()) as ProfilePatchBody
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
@@ -69,7 +90,7 @@ export async function PATCH(request: Request) {
     "onboarding_completed",
   ]
 
-  const updateData: Record<string, any> = {
+  const updateData: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   }
 
@@ -97,73 +118,40 @@ export async function PATCH(request: Request) {
     }
   }
 
-  let { data: updatedProfile, error: updateError } = await supabase
+  const { data: updatedProfile, error: updateError } = await supabase
     .from("profiles")
     .update(updateData)
     .eq("id", user.id)
     .select()
     .single()
 
-  const droppedFields: string[] = []
-  let retries = 0
-
-  // Check for schema errors using error codes: 42703 (undefined_column) or schema cache issues
-  while (
-    updateError &&
-    (updateError.code === "42703" ||
-     updateError.code === "PGRST204" ||
-     updateError.message?.includes("schema cache")) &&
-    retries < 5
-  ) {
-    // Parse which field is problematic from error message
-    let fieldToRemove: string | null = null
-
-    if (updateError.message?.includes("career_preferences")) {
-      fieldToRemove = "career_preferences"
-    } else if (updateError.message?.includes("achievements")) {
-      fieldToRemove = "achievements"
-    } else if (updateError.message?.includes("avatar_url")) {
-      fieldToRemove = "avatar_url"
-    }
-
-    if (fieldToRemove && updateData[fieldToRemove] !== undefined) {
-      delete updateData[fieldToRemove]
-      droppedFields.push(fieldToRemove)
-    } else {
-      // Fallback: remove both career_preferences and achievements
-      if (updateData.career_preferences !== undefined) {
-        delete updateData.career_preferences
-        droppedFields.push("career_preferences")
-      }
-      if (updateData.achievements !== undefined) {
-        delete updateData.achievements
-        droppedFields.push("achievements")
-      }
-    }
-
-    const retry = await supabase
-      .from("profiles")
-      .update(updateData)
-      .eq("id", user.id)
-      .select()
-      .single()
-    updatedProfile = retry.data
-    updateError = retry.error
-    retries++
-  }
-
   if (updateError) {
+    // Previously this silently deleted whichever field the error mentioned
+    // and retried up to 5 times, returning 200 even when a field never
+    // persisted — a user could edit their profile, see "success," and have
+    // the change silently vanish (AUDIT_AND_ROADMAP.md Flaw 4). A schema
+    // mismatch (e.g. a migration that hasn't been applied to this
+    // environment yet) is a real, actionable error — surface it instead of
+    // hiding it.
+    const isSchemaMismatch =
+      updateError.message?.includes("column") ||
+      updateError.message?.includes("schema cache")
+
+    console.error(
+      isSchemaMismatch
+        ? `Profile update failed due to a schema mismatch — check that all migrations under supabase/migrations/ have been applied: ${updateError.message}`
+        : `Profile update failed: ${updateError.message}`
+    )
+
     return NextResponse.json(
-      { error: `Failed to update profile: ${updateError.message}` },
+      {
+        error: isSchemaMismatch
+          ? "Failed to update profile: the database schema doesn't match the app yet. Please contact support or re-run migrations."
+          : `Failed to update profile: ${updateError.message}`,
+      },
       { status: 500 }
     )
   }
 
-  return NextResponse.json({
-    profile: updatedProfile,
-    ...(droppedFields.length > 0 && {
-      warning: `Some fields were not saved due to schema limitations: ${droppedFields.join(", ")}`,
-      droppedFields
-    })
-  })
+  return NextResponse.json({ profile: updatedProfile })
 }

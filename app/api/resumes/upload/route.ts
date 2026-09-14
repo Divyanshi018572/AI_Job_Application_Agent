@@ -2,12 +2,46 @@ import { NextResponse } from "next/server"
 
 import { parseResumeWithGemini } from "@/lib/ai/gemini"
 import { requireUser } from "@/lib/auth/session"
+import {
+  ALLOWED_RESUME_TYPES,
+  detectFileType,
+  isAllowedType,
+} from "@/lib/security/file-validation"
+import type { Json } from "@/types/database"
+
+function asJson(value: unknown): Json {
+  return value as Json
+}
+
+const SIGNED_URL_TTL_SECONDS = 600
+
+// Interim cost/abuse guard until Phase 4's real usage enforcement exists
+// (see AUDIT_AND_ROADMAP.md Flaw 7). Each upload triggers a real Gemini (and
+// possibly Groq) API call — this keeps a single user from running up an
+// open-ended bill via a buggy retry loop or deliberate abuse.
+const MAX_UPLOADS_PER_HOUR = 5
 
 export async function POST(request: Request) {
   const { supabase, user, error } = await requireUser()
 
   if (error || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count: recentUploadCount, error: rateLimitError } = await supabase
+    .from("resumes")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneHourAgo)
+
+  if (!rateLimitError && (recentUploadCount ?? 0) >= MAX_UPLOADS_PER_HOUR) {
+    return NextResponse.json(
+      {
+        error: `Upload limit reached (${MAX_UPLOADS_PER_HOUR} per hour). Please try again later.`,
+      },
+      { status: 429 }
+    )
   }
 
   let formData: FormData
@@ -37,21 +71,45 @@ export async function POST(request: Request) {
   }
 
   const fileBuffer = Buffer.from(await file.arrayBuffer())
-  let extractedText = ""
 
-  // Attempt lightweight text extraction for plain text files or pdf fallback
-  if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+  // Never trust the client-supplied content type / extension — sniff the
+  // real type from magic bytes (SECURITY.md Section 3).
+  const detectedType = detectFileType(fileBuffer)
+  if (!isAllowedType(detectedType, ALLOWED_RESUME_TYPES)) {
+    return NextResponse.json(
+      {
+        error:
+          "Unsupported or unrecognized file format. Allowed: PDF or plain text.",
+      },
+      { status: 400 }
+    )
+  }
+
+  let extractedText = ""
+  if (detectedType === "text/plain") {
     extractedText = fileBuffer.toString("utf-8")
-  } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+  } else if (detectedType === "application/pdf") {
+    // NOTE: pdf-parse v2 replaced the v1 `default(buffer) -> { text }` function
+    // API with a `PDFParse` class (`new PDFParse({ data }).getText()`). The
+    // previous code here still called the old function API, which no longer
+    // exists on v2 — it always threw, was always silently swallowed, and
+    // extractedText was always empty for PDFs. That meant every PDF upload
+    // skipped the fast text path (fine, Gemini reads the PDF directly) but
+    // also meant the Groq fallback could never trigger for a PDF resume,
+    // since that fallback requires non-empty extractedText.
+    let parser: InstanceType<typeof import("pdf-parse").PDFParse> | null = null
     try {
-      const pdfParse = (await import("pdf-parse")).default
-      const pdfData = await pdfParse(fileBuffer)
-      if (pdfData?.text) {
-        extractedText = pdfData.text
+      const { PDFParse } = await import("pdf-parse")
+      parser = new PDFParse({ data: fileBuffer })
+      const textResult = await parser.getText()
+      if (textResult?.text) {
+        extractedText = textResult.text
       }
     } catch (e) {
       // If pdf-parse isn't available or fails, Gemini multimodal inline_data will handle it
       console.warn("pdf-parse text extraction skipped, using Gemini base64 inlineData:", e)
+    } finally {
+      await parser?.destroy()
     }
   }
 
@@ -62,7 +120,7 @@ export async function POST(request: Request) {
   const { error: uploadError } = await supabase.storage
     .from("resumes")
     .upload(filePath, fileBuffer, {
-      contentType: file.type || "application/pdf",
+      contentType: detectedType,
       upsert: false,
     })
 
@@ -73,30 +131,28 @@ export async function POST(request: Request) {
     )
   }
 
-  let fileUrl = null
-  const { data: publicUrlData } = supabase.storage
+  // The "resumes" bucket is private by design — generate a short-lived
+  // signed URL for the immediate response only. Nothing long-lived is
+  // persisted; GET /api/resumes regenerates a fresh one on every read
+  // (see AUDIT_AND_ROADMAP.md Flaw 2).
+  const { data: signedUrlData } = await supabase.storage
     .from("resumes")
-    .getPublicUrl(filePath)
-  if (publicUrlData?.publicUrl) {
-    fileUrl = publicUrlData.publicUrl
-  }
+    .createSignedUrl(filePath, SIGNED_URL_TTL_SECONDS)
 
   // 2. Parse resume with Google Gemini AI
   let parsedResume
   try {
     parsedResume = await parseResumeWithGemini(
       fileBuffer,
-      file.type || "application/pdf",
+      detectedType,
       extractedText
     )
-  } catch (parseError: any) {
+  } catch (parseError: unknown) {
     // Even if AI parsing fails, clean up or report descriptive error
+    const message =
+      parseError instanceof Error ? parseError.message : "Unknown error"
     return NextResponse.json(
-      {
-        error: `Gemini AI parsing failed: ${
-          parseError?.message || "Unknown error"
-        }`,
-      },
+      { error: `Gemini AI parsing failed: ${message}` },
       { status: 502 }
     )
   }
@@ -108,10 +164,10 @@ export async function POST(request: Request) {
       user_id: user.id,
       file_name: file.name,
       file_path: filePath,
-      file_url: fileUrl,
+      file_url: null,
       file_size: file.size,
-      content_type: file.type || "application/pdf",
-      parsed_data: parsedResume as any,
+      content_type: detectedType,
+      parsed_data: asJson(parsedResume),
     })
     .select()
     .single()
@@ -132,12 +188,12 @@ export async function POST(request: Request) {
       phone: parsedResume.profile.phone || null,
       location: parsedResume.profile.location || null,
       summary: parsedResume.summary || null,
-      skills: parsedResume.skills as any,
-      work_experience: parsedResume.workExperience as any,
-      education: parsedResume.education as any,
-      projects: parsedResume.projects as any,
-      certifications: parsedResume.certifications as any,
-      links: parsedResume.profile.links as any,
+      skills: asJson(parsedResume.skills),
+      work_experience: asJson(parsedResume.workExperience),
+      education: asJson(parsedResume.education),
+      projects: asJson(parsedResume.projects),
+      certifications: asJson(parsedResume.certifications),
+      links: asJson(parsedResume.profile.links),
       updated_at: new Date().toISOString(),
     })
     .eq("id", user.id)
@@ -148,7 +204,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     {
-      resume: resumeRow,
+      resume: { ...resumeRow, file_url: signedUrlData?.signedUrl ?? null },
       parsed: parsedResume,
       message: "Resume uploaded and parsed successfully",
     },

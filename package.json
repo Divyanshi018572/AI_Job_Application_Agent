@@ -14,7 +14,9 @@
     "start:chrome": "powershell -NoProfile -File ./scripts/open-browser.ps1 -Mode start -Browser chrome",
     "open:edge": "powershell -NoProfile -File ./scripts/open-browser.ps1 -Browser edge",
     "open:chrome": "powershell -NoProfile -File ./scripts/open-browser.ps1 -Browser chrome",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -53,6 +55,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }
