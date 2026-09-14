@@ -95,27 +95,15 @@ export async function POST(request: Request) {
 
   const fileUrl = publicUrlData.publicUrl
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single()
-
-  const existingParsedData = (profile?.parsed_data ?? {}) as Record<string, unknown>
-  const existingProfileData = (existingParsedData.profile ?? {}) as Record<string, unknown>
-  const updatedParsedData = {
-    ...existingParsedData,
-    profile: {
-      ...existingProfileData,
-      avatarUrl: fileUrl,
-    },
-  }
-
+  // `profiles` has no `parsed_data` column — only the `resumes` table does
+  // (supabase/migrations/20260714000000_resume_onboarding_schema.sql). An
+  // earlier version of this route read/wrote `profiles.parsed_data`, which
+  // doesn't exist, so every avatar upload would fail here right after a
+  // successful storage upload. Fixed to only touch real columns.
   const { error: updateError } = await supabase
     .from("profiles")
     .update({
       avatar_url: fileUrl,
-      parsed_data: updatedParsedData,
       updated_at: new Date().toISOString(),
     })
     .eq("id", user.id)
