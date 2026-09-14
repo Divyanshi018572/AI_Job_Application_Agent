@@ -8,7 +8,6 @@ import {
   Check,
   FolderGit2,
   GraduationCap,
-  Link as LinkIcon,
   Loader2,
   Plus,
   Save,
@@ -182,7 +181,7 @@ export function ProfileEditor() {
             })
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Failed to fetch profile:", err)
       } finally {
         setIsLoading(false)
@@ -227,8 +226,8 @@ export function ProfileEditor() {
 
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err: any) {
-      setErrorMsg(err.message || "An error occurred while saving.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "An error occurred while saving.")
     } finally {
       setIsSaving(false)
     }
@@ -267,8 +266,8 @@ export function ProfileEditor() {
         setSaveSuccess(true)
         setTimeout(() => setSaveSuccess(false), 3000)
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to upload image. Please try again.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to upload image. Please try again.")
     } finally {
       setIsUploadingAvatar(false)
       if (fileInputRef.current) {
@@ -299,8 +298,8 @@ export function ProfileEditor() {
       })
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to remove image.")
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to remove image.")
     } finally {
       setIsUploadingAvatar(false)
     }
