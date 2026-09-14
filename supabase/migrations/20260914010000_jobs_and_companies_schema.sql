@@ -12,6 +12,20 @@
 -- board within 6 hours," not cross-user deduplication — worth knowing if
 -- ingestion volume ever becomes a concern with many users tracking the
 -- same popular companies.
+--
+-- Deviation from the plan's literal schema, documented (see
+-- AUDIT_AND_ROADMAP.md): added `board_token`. Greenhouse/Lever/Workable
+-- adapters resolve jobs from a board *token*, not a company display name —
+-- Greenhouse/Lever's RawJob.company is literally the token as a
+-- placeholder until Task 2.5 resolves real names. Without storing the
+-- token, there'd be no reliable way to answer "have we fetched this
+-- board recently" (Task 2.3's whole job), or to dedupe safely — the
+-- plan's suggested "dedupe by company+title+location" breaks the moment
+-- two boards share a token-derived placeholder name or a job is re-titled
+-- slightly between fetches. Deduping on (user_id, job_url) instead, since
+-- every adapter already provides a real, stable, unique-per-posting URL —
+-- strictly more precise than fuzzy text matching, and it's data we already
+-- have from every platform.
 
 create extension if not exists "vector";
 
@@ -49,6 +63,7 @@ create table if not exists public.jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users (id) on delete cascade,
   platform text not null check (platform in ('greenhouse', 'lever', 'workable')),
+  board_token text not null,
   title text not null,
   company text not null,
   company_id uuid references public.companies (id) on delete set null,
@@ -106,12 +121,20 @@ create policy "jobs_delete_own"
 
 grant select, insert, update, delete on public.jobs to authenticated;
 
--- Cross-cutting requirement: "Duplicate/stale jobs: Dedupe by
--- company+title+location." Enforced at the DB level so a repeated
--- ingestion run for the same user can upsert (ON CONFLICT) instead of
--- creating duplicate rows.
+-- Cross-cutting requirement: "Duplicate/stale jobs: Dedupe..." — enforced
+-- at the DB level on (user_id, job_url) (see design note above for why
+-- this replaces the plan's literal "company+title+location" suggestion)
+-- so a repeated ingestion run can upsert (ON CONFLICT) instead of creating
+-- duplicate rows. Plain columns (no lower()/expressions), deliberately —
+-- Supabase's REST upsert (`on_conflict=`) can only target a plain-column
+-- unique constraint, not an expression index.
 create unique index if not exists jobs_dedupe_idx
-  on public.jobs (user_id, lower(company), lower(title), lower(coalesce(location, '')));
+  on public.jobs (user_id, job_url);
+
+-- Task 2.3's cache-freshness check ("has this user fetched this exact
+-- board recently") queries by this combination directly.
+create index if not exists jobs_cache_lookup_idx
+  on public.jobs (user_id, platform, board_token, fetched_at desc);
 
 -- Structural filters first (plan Task 3.3: "structural filters... all
 -- indexed columns" run before the expensive embedding-similarity ranking
