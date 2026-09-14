@@ -158,13 +158,33 @@ Then built the pipeline itself, making `/dashboard/jobs` show real data for the 
 
 **Mid-session merge note:** PR #10 for this branch got merged into `dev` (as `b32ea2a`) while the branch still only had its first commit — before the `board_token` fix and the ingestion pipeline itself were pushed. `dev` briefly had the incomplete schema (no `board_token`, the unusable `lower(...)`-expression dedupe index) and none of the pipeline code. Merged the branch's remaining two commits (`707a979`, `ca2c6ee`) directly into `dev` to close the gap — clean merge, no conflicts, since `dev`'s version of the migration file was a strict ancestor of the branch's later edits. Re-verified after merging: lint clean, typecheck clean, all 109 tests passing, build clean, pushed as `6ab7dab`.
 
+## Session 12 — Repair Migration for the jobs Schema
+
+Because PR #10 merged the first revision of `20260914010000_jobs_and_companies_schema.sql` before the `board_token` fix, a database could be in either state depending on when the file was applied. Re-running the corrected file doesn't fix an old-revision database — tested: it fails outright with `policy "companies_select_all" for table "companies" already exists`, since Postgres policies have no `if not exists`.
+
+Added `supabase/migrations/20260914020000_jobs_board_token_repair.sql` — an idempotent follow-up that adds `board_token` (backfilled from `company` for any existing rows), drops and recreates `jobs_dedupe_idx` as `(user_id, job_url)`, and adds the cache-lookup index.
+
+Verified against a real Postgres 16 + pgvector container (with stubs for Supabase's `auth` schema), every scenario ending in the same correct schema:
+
+| Scenario | Result |
+|---|---|
+| Old revision → repair | ✅ fixed |
+| Old revision + an existing row → repair | ✅ fixed, row backfilled |
+| Corrected revision → repair | ✅ no-op |
+| Repair run twice | ✅ idempotent |
+| Old revision → corrected revision, no repair | ❌ errors (the trap this file avoids) |
+
+Also confirmed the ingestion code's `ON CONFLICT (user_id, job_url)` upsert updates an existing row rather than duplicating it.
+
+**How to apply** (Supabase SQL Editor): if the jobs migration has never been run, run `20260914010000_jobs_and_companies_schema.sql` first. Then run `20260914020000_jobs_board_token_repair.sql` — safe regardless of which revision is live.
+
 ---
 
 ## Current Repo State (as of this entry)
 
-- `dev`: has everything through Session 11 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, 2.4 merged, and Task 2.3's full ingestion pipeline (schema + `board_token` fix + `lib/jobs/*` + `/api/jobs*` + the jobs dashboard UI) all present and verified. CI green.
+- `dev`: has everything through Session 12 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, 2.4 merged, and Task 2.3's full ingestion pipeline (schema + `board_token` fix + `lib/jobs/*` + `/api/jobs*` + the jobs dashboard UI) all present and verified. CI green.
 - `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 and all of Session 11's ingestion pipeline, which only reached `dev`. Will diverge again until the default-branch fix happens or you merge `dev` into `main`.
 - No open feature branches.
-- **Action needed before the pipeline can write anything:** apply `supabase/migrations/20260914010000_jobs_and_companies_schema.sql` (the *current* version on `dev`, which includes `board_token` — if you already ran an earlier copy of this file, re-check it has `board_token` and the `(user_id, job_url)` dedupe index; add them by hand if not, since Postgres migrations don't reapply automatically) via the Supabase SQL Editor, same process as the avatars bucket migration.
+- **Action needed before the pipeline can write anything:** see Session 12 — apply the jobs migration (if not already applied), then the repair migration.
 - Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged `v1.0-phase1-complete`.
 - Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.3, 2.4 all done and merged to `dev`. Task 2.5 (company metadata table) has its schema but no seed data or ingestion-time enrichment yet.
