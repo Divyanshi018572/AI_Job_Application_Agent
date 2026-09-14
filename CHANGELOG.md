@@ -94,13 +94,26 @@ You completed items 1–4 above yourself: rotated the Groq key, applied the avat
 
 Fixed by merging `origin/main` back into `dev` (clean merge, no conflicts — the two PRs touched entirely different files) (`fdb2460`). Verified after merging: lint (0 errors), typecheck (clean), all 43 tests passing, production build clean, CI green on the push.
 
-**Phase 1 (Foundation & Security) is now complete** — every item in Task 1.1–1.4 is done and the plan's Phase 1 gate (two-account test) has passed. Ready to tag `v1.0-phase1-complete`.
+**Phase 1 (Foundation & Security) is now complete** — every item in Task 1.1–1.4 is done and the plan's Phase 1 gate (two-account test) has passed. Tagged `v1.0-phase1-complete` and pushed (`4204f0f` on `dev`).
+
+## Session 8 — Phase 2.1 Complete: Lever + Workable Adapters
+
+**Branch:** `phase2/2.1-lever-workable-adapters` (pushed, PR not yet opened/merged)
+
+Completed Task 2.1 (ATS API Integration) — the two remaining plan-specified platforms, both using their public job-board APIs, no credentials needed:
+
+- `lib/ats/adapters/lever.ts` — maps Lever's public Postings API response; `createdAt` (the only timestamp Lever's public endpoint exposes) used as `updatedAt`, documented as actually being creation time.
+- `lib/ats/adapters/workable.ts` — maps Workable's public widget API response; unlike Greenhouse/Lever, this one *does* return a real company display name, used directly. Full job descriptions aren't in the list response (only the per-job detail endpoint has them) — left `undefined` rather than firing N extra requests per board on every ingestion pass, noted inline.
+- Both registered in `lib/ats/registry.ts` alongside Greenhouse.
+- 19 new tests; the registry's contract test now automatically covers all 3 adapters. 64 tests total in the suite.
+
+Task 2.1 is now fully done: interface, registry, and all three adapters the plan specifies.
 
 ---
 
 ## Current Repo State (as of this entry)
 
-- `dev` and `main`: **in sync**, both have everything through Session 7, CI green on both.
-- No open feature branches — both prior PRs merged.
-- Phase 1 (Foundation & Security): **✅ complete**, gate passed.
-- Phase 2 (Core Discovery): started (ATS adapter interface + working Greenhouse adapter). Remaining for Phase 2: Lever/Workable adapters, company token discovery (Task 2.2), caching/rate limits (Task 2.3), job classification (Task 2.4), company metadata table (Task 2.5) — none of these need human intervention to build, only to eventually test against real ATS boards.
+- `dev` and `main`: **in sync** through Session 7, CI green on both. Tag `v1.0-phase1-complete` pushed.
+- Open branch: `phase2/2.1-lever-workable-adapters`, pushed, ready for a PR into `dev`. Auto-generated link: `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.1-lever-workable-adapters`.
+- Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged.
+- Phase 2 (Core Discovery): Task 2.1 (ATS API Integration) done pending this PR's merge. Remaining for Phase 2: company token discovery (Task 2.2), caching/rate limits (Task 2.3), job classification (Task 2.4), company metadata table (Task 2.5), and a `jobs` table to actually persist what the adapters fetch — none of these need human intervention to build, only to eventually test against real ATS boards.
