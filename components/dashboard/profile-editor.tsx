@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ProfileCompletenessCard } from "@/components/dashboard/profile-completeness-card"
 import type {
   CertificationItem,
   EducationItem,
@@ -395,8 +396,8 @@ export function ProfileEditor() {
 
       {/* Main Two-Column Layout: Vertical Navigation Sidebar Left, Active Card Right */}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-4">
-        {/* Left Column: Vertical Navigation Tabs */}
-        <div className="lg:col-span-1">
+        {/* Left Column: Vertical Navigation Tabs & Profile Completeness Card */}
+        <div className="lg:col-span-1 flex flex-col gap-6">
           <div className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
             {(
               [
@@ -445,6 +446,15 @@ export function ProfileEditor() {
               )
             })}
           </div>
+
+          <ProfileCompletenessCard
+            profileData={profileData}
+            hasUploadedResume={Boolean(
+              profileData.summary ||
+                (Array.isArray(profileData.skills) && profileData.skills.length > 0)
+            )}
+            onNavigateTab={(tabId) => setActiveTab(tabId as TabKey)}
+          />
         </div>
 
         {/* Right Column: Active Category Content */}
