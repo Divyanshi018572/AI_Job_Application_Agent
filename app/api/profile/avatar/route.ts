@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     // Surface the real failure instead of silently falling back to storing
     // a base64 copy of the image inline in the database (the previous
     // behavior — see AUDIT_AND_ROADMAP.md Flaw 1).
+    console.error("Avatar upload failed:", uploadError)
     return NextResponse.json(
       { error: `Avatar upload failed: ${uploadError.message}` },
       { status: 500 }
@@ -120,6 +121,7 @@ export async function POST(request: Request) {
     .eq("id", user.id)
 
   if (updateError) {
+    console.error("Failed to update profile avatar_url:", updateError)
     return NextResponse.json(
       { error: `Avatar uploaded but failed to save to profile: ${updateError.message}` },
       { status: 500 }
