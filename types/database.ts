@@ -12,6 +12,123 @@ export type Database = {
   }
   public: {
     Tables: {
+      companies: {
+        Row: {
+          id: string
+          name: string
+          domain: string | null
+          company_type: string | null
+          employee_count_range: string | null
+          source: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          domain?: string | null
+          company_type?: string | null
+          employee_count_range?: string | null
+          source?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          domain?: string | null
+          company_type?: string | null
+          employee_count_range?: string | null
+          source?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      jobs: {
+        Row: {
+          id: string
+          user_id: string
+          platform: string
+          board_token: string
+          title: string
+          company: string
+          company_id: string | null
+          company_logo: string | null
+          location: string | null
+          salary_min: number | null
+          salary_max: number | null
+          salary_disclosed: boolean
+          job_type: string | null
+          experience_level: string | null
+          employment_type: string | null
+          work_mode: string | null
+          description: string | null
+          tags: Json
+          match_score: number | null
+          embedding: unknown | null
+          job_url: string
+          source_url: string | null
+          applied_status: string
+          saved_status: boolean
+          fetched_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          platform: string
+          board_token: string
+          title: string
+          company: string
+          company_id?: string | null
+          company_logo?: string | null
+          location?: string | null
+          salary_min?: number | null
+          salary_max?: number | null
+          salary_disclosed?: boolean
+          job_type?: string | null
+          experience_level?: string | null
+          employment_type?: string | null
+          work_mode?: string | null
+          description?: string | null
+          tags?: Json
+          match_score?: number | null
+          embedding?: unknown | null
+          job_url: string
+          source_url?: string | null
+          applied_status?: string
+          saved_status?: boolean
+          fetched_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          platform?: string
+          board_token?: string
+          title?: string
+          company?: string
+          company_id?: string | null
+          company_logo?: string | null
+          location?: string | null
+          salary_min?: number | null
+          salary_max?: number | null
+          salary_disclosed?: boolean
+          job_type?: string | null
+          experience_level?: string | null
+          employment_type?: string | null
+          work_mode?: string | null
+          description?: string | null
+          tags?: Json
+          match_score?: number | null
+          embedding?: unknown | null
+          job_url?: string
+          source_url?: string | null
+          applied_status?: string
+          saved_status?: boolean
+          fetched_at?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       job_applications: {
         Row: {
           company: string | null
