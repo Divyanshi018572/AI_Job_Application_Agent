@@ -129,17 +129,20 @@ Two deliberate, documented provider swaps this session, both because the plan's 
 
 **New env vars needed** (documented in `.env.example`, not yet in your `.env.local`): `NVIDIA_API_KEY` (from build.nvidia.com), `TAVILY_API_KEY` (from tavily.com). Neither is needed for anything already merged — only once these two branches land and get wired into a live ingestion flow.
 
-**Merge order matters:** open/merge `phase2/2.1-lever-workable-adapters` first, then `phase2/2.2-company-token-discovery` (already contains 2.1's commits, so it'll show as already-merged for those, no conflict), then `phase2/2.4-job-classification-pipeline` in either order relative to the others.
+## Session 10 — dev/main Reconciliation (again)
+
+Same issue as Session 7: PR #8 (`phase2/2.2-company-token-discovery`, which also carried the Lever/Workable adapters merged inside it) landed on **`main`** instead of `dev`, while PR #9 (job classification) correctly landed on `dev`. Net effect: `main` had discovery + Lever/Workable, `dev` had job classification, neither had both.
+
+Fixed the same way as before: merged `origin/main` into `dev`. One conflict this time, in `.env.example` (both sides had added a different new env var section) — resolved by keeping both additions (`NVIDIA_API_KEY` and `TAVILY_API_KEY`). Verified after merging: lint (0 errors, 2 known warnings), typecheck clean, all 93 tests passing, production build clean (`641c4e1`).
+
+**If this keeps happening:** it's worth checking whether the repo's default branch on GitHub is set to `main` — that's what a PR's base defaults to unless changed, which would explain why this specific mistake recurs. Changing the GitHub repo's default branch to `dev` (Settings → General → Default branch) would fix it at the source instead of catching it after the fact each time.
 
 ---
 
 ## Current Repo State (as of this entry)
 
-- `dev` and `main`: **in sync** through Session 7, CI green on both. Tag `v1.0-phase1-complete` pushed.
-- Open branches, all pushed, none merged yet:
-  - `phase2/2.1-lever-workable-adapters` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.1-lever-workable-adapters`
-  - `phase2/2.2-company-token-discovery` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.2-company-token-discovery`
-  - `phase2/2.4-job-classification-pipeline` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.4-job-classification-pipeline`
-- Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged.
-- Phase 2 (Core Discovery): Tasks 2.1, 2.2, and 2.4 done pending PR merges. Remaining: Task 2.3 (caching/rate limits) and Task 2.5 (company metadata table + real curated-list seed) — both need a `jobs`/`companies` table, which doesn't exist yet.
-- Phase 2 (Core Discovery): Task 2.1 (ATS API Integration) done pending this PR's merge. Remaining for Phase 2: company token discovery (Task 2.2), caching/rate limits (Task 2.3), job classification (Task 2.4), company metadata table (Task 2.5), and a `jobs` table to actually persist what the adapters fetch — none of these need human intervention to build, only to eventually test against real ATS boards.
+- `dev`: has everything through Session 10 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, and 2.4 all merged in. CI green.
+- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 (job classification), which only reached `dev`. `main` and `dev` will diverge again until you either merge `dev` into `main` or fix the default-branch setting above.
+- No open feature branches — all three Phase 2 PRs merged (2.1 and 2.2 into `main`, 2.4 into `dev`, `dev` now reconciled to have all three).
+- Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged `v1.0-phase1-complete`.
+- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.4 done and merged. Remaining: Task 2.3 (caching/rate limits) and Task 2.5 (company metadata table + real curated-list seed) — both need a `jobs`/`companies` table, which doesn't exist yet.
