@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { normalizeParsedResume } from "@/lib/ai/gemini"
+import type { ParsedResume } from "@/types/resume"
 
 describe("normalizeParsedResume", () => {
   it("fills in every field with a safe default when the model returns an empty object", () => {
@@ -57,5 +58,33 @@ describe("normalizeParsedResume", () => {
 
     expect(result.skills).toEqual([])
     expect(result.education).toEqual([])
+  })
+
+  it("normalizes fieldConfidence from the model response (Plan Task 1.3)", () => {
+    // LLM output isn't type-checked at the source — build the raw payload
+    // as untyped JSON (as a real model response would arrive) rather than
+    // through the strict ParsedResume type, so this actually exercises the
+    // "the model hallucinated a field we didn't ask for" path.
+    const rawModelResponse = JSON.parse(
+      JSON.stringify({
+        fieldConfidence: {
+          "profile.fullName": 0.95,
+          summary: 0.4,
+          "profile.notARealField": 0.9,
+        },
+      })
+    ) as Partial<ParsedResume>
+
+    const result = normalizeParsedResume(rawModelResponse)
+
+    expect(result.fieldConfidence).toEqual({
+      "profile.fullName": 0.95,
+      summary: 0.4,
+    })
+  })
+
+  it("omits fieldConfidence entirely when the model didn't return one", () => {
+    const result = normalizeParsedResume({})
+    expect(result.fieldConfidence).toBeUndefined()
   })
 })
