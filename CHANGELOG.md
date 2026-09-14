@@ -8,11 +8,12 @@ Running record of every change made to this repo across agent sessions, kept in 
 
 | # | Item | Why it can't be done from an agent session | Status |
 |---|---|---|---|
-| 1 | Rotate the `GROQ_API_KEY` in the Groq console | A real-looking key was found committed in `.env.example`; only console access can rotate it | **Open** |
-| 2 | Apply `supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql` in the Supabase SQL Editor | No Supabase CLI link or MCP access in these sessions; migrations here are applied manually | You said you'd do this — **confirm once done** |
-| 3 | Manual two-account cross-tenant test (plan's Phase 1 gate) | Needs two real accounts against a live Supabase project | **Open** — blocks tagging `v1.0-phase1-complete` and, per the plan, Phase 2 |
-| 4 | Link the Supabase CLI (`supabase link`) if you want `supabase db push` instead of hand-pasting SQL for future migrations | Needs your Supabase access token, which shouldn't be handled in chat | **Optional**, offered, not started |
-| 5 | Decide when to merge `dev` into `main` | `dev` is currently 19 commits ahead of `main`; merging to `main` is a release decision, not something to do unprompted | **Your call** |
+| 1 | Rotate the `GROQ_API_KEY` in the Groq console | Only console access can rotate it | ✅ **Done** (user-confirmed) |
+| 2 | Apply `supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql` in the Supabase SQL Editor | Migrations here are applied manually, no CLI/MCP access from agent sessions | ✅ **Done** (user-confirmed, avatar upload works live) |
+| 3 | Manual two-account cross-tenant test (plan's Phase 1 gate) | Needs two real accounts against a live Supabase project | ✅ **Done** (user-confirmed, no leakage found) — see Session 7 |
+| 4 | Open + merge the two pending PRs (`phase1/1.3-...`, `phase2/2.1-...`) | Needs GitHub UI access | ✅ **Done** — see Session 7 for a process note on where PR #5 landed |
+| 5 | Link the Supabase CLI (`supabase link`) if you want `supabase db push` instead of hand-pasting SQL for future migrations | Needs your Supabase access token, which shouldn't be handled in chat | **Optional**, offered, not started |
+| 6 | Decide when to merge `dev` into `main` again | `main` currently has everything `dev` has (reconciled in Session 7) — no action needed until the next round of feature branches | **Your call**, not urgent right now |
 
 ---
 
@@ -85,13 +86,21 @@ Closed the last open requirement of plan Task 1.3 ("per-field confidence score, 
   - Along the way: configured ESLint to respect the leading-underscore "intentionally unused parameter" convention (needed for the `submitApplication` stub's unused args), and gitignored `supabase/.temp/` on this branch too (same fix as `dev`, this branch predates that commit).
 - **Not done yet** (explicitly out of scope for this task, follow-up per the plan's own Task 2.2–2.5 breakdown): Lever and Workable adapters, persisting fetched jobs to a `jobs` table (no such table exists yet), company token discovery, caching/rate limits, job classification, and any UI. None of this was skipped by oversight — it's the next slice of Phase 2, not part of Task 2.1's adapter-interface deliverable.
 
+## Session 7 — Phase 1 Gate Cleared + dev/main Reconciliation
+
+You completed items 1–4 above yourself: rotated the Groq key, applied the avatars migration (confirmed working live), ran the two-account cross-tenant test with no leakage found, and merged both pending PRs on GitHub.
+
+**Process note worth knowing for next time:** PR #5 (`phase1/1.3-resume-confidence-scores`) got merged with base **`main`** instead of `dev` — probably GitHub defaulting the PR's base branch rather than it being changed on purpose. PR #6 (`phase2/2.1-ats-api-integration`) correctly merged into `dev`. Net effect: `main` ended up with both features, but `dev` was missing the confidence-score work. **When opening a PR, double-check the base branch reads `dev`, not `main`** — your own `.agents/AGENTS.md` workflow already says all work should land on `dev` first.
+
+Fixed by merging `origin/main` back into `dev` (clean merge, no conflicts — the two PRs touched entirely different files) (`fdb2460`). Verified after merging: lint (0 errors), typecheck (clean), all 43 tests passing, production build clean, CI green on the push.
+
+**Phase 1 (Foundation & Security) is now complete** — every item in Task 1.1–1.4 is done and the plan's Phase 1 gate (two-account test) has passed. Ready to tag `v1.0-phase1-complete`.
+
 ---
 
 ## Current Repo State (as of this entry)
 
-- `dev`: up to date with Sessions 1–4 + this changelog, CI green.
-- `main`: 19 commits behind `dev` — not touched by any agent session; merging is your call.
-- Open branches, both pushed, neither merged yet:
-  - `phase1/1.3-resume-confidence-scores` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase1/1.3-resume-confidence-scores`
-  - `phase2/2.1-ats-api-integration` — `https://github.com/Divyanshi018572/AI_Job_Application_Agent/pull/new/phase2/2.1-ats-api-integration`
-- Phase 1 (Foundation & Security) is functionally complete pending items #2 and #3 in the intervention table above. Phase 2 (Core Discovery) has started (adapter interface + Greenhouse), pending the rest of Task 2.1's platforms and Tasks 2.2–2.5.
+- `dev` and `main`: **in sync**, both have everything through Session 7, CI green on both.
+- No open feature branches — both prior PRs merged.
+- Phase 1 (Foundation & Security): **✅ complete**, gate passed.
+- Phase 2 (Core Discovery): started (ATS adapter interface + working Greenhouse adapter). Remaining for Phase 2: Lever/Workable adapters, company token discovery (Task 2.2), caching/rate limits (Task 2.3), job classification (Task 2.4), company metadata table (Task 2.5) — none of these need human intervention to build, only to eventually test against real ATS boards.

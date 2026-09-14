@@ -11,7 +11,9 @@
 
 The plan requires Phase 0 (Git workflow, CI, CD, branch protection) to exist **before any product code**. It does not exist. All work so far — roughly the first half of Phase 1 — has been built directly on `dev` with no tests, no CI, no branch-per-task discipline, and no PRs. Functionally, authentication, the dashboard shell, and profile/resume onboarding work, and the Row-Level Security (RLS) foundation is genuinely well built. But two of the newer features (avatar upload, resume file links) are silently broken by a storage-policy mismatch, and one committed file contains what looks like a live API key.
 
-**Bottom line:** call it **Phase 1 ~60% complete, Phase 0 ~0% complete, Phases 2–8 ~0% complete.** Nothing should be added to Phase 2 (job discovery) until the Phase 0 gap and the flaws in Section 3 are closed — the plan's own gate rule for Phase 1 ("two-account leak test, go/no-go before Phase 2") hasn't been run either.
+**Bottom line (at the time this audit was written):** call it **Phase 1 ~60% complete, Phase 0 ~0% complete, Phases 2–8 ~0% complete.**
+
+> **Update:** as of `CHANGELOG.md` Session 7, every flaw below is fixed, the plan's Phase 1 gate (two-account leak test) has been run with no leakage found, and Phase 2 has started. This section is kept as-written for the historical record of what the audit originally found — see Section 2's status column and the Task Tracking table at the end of this document for current reality.
 
 ---
 
@@ -23,8 +25,8 @@ The plan requires Phase 0 (Git workflow, CI, CD, branch protection) to exist **b
 | **1.1 Dashboard Layout** | Collapsible sidebar, nav, footer | **Done.** `app/dashboard/layout.tsx`, `app-sidebar.tsx`, `navigation.ts` all present and wired. | — |
 | **1.2 Authentication** | Google OAuth, email/password, reset flow | **Done** (email/password + reset flow confirmed; Google OAuth callback route exists at `app/auth/callback`, not independently verified end-to-end). | `app/api/auth/*/route.ts` |
 | **1.3 Onboarding & Resume Parsing** | Blocking upload dialog, signed-URL-only storage, per-field confidence scores, editable low-confidence fields | **Done as of `phase1/1.3-resume-confidence-scores`.** Upload dialog, Gemini/Groq parsing, and signed-URL storage all work (Flaw 2 fixed in the stabilization sprint). Gemini now scores 10 top-level fields 0.0–1.0 at extraction time (`lib/ai/gemini.ts`'s `RESUME_EXTRACTION_PROMPT`), normalized/validated in `lib/resume/confidence.ts`, and surfaced as a "Please verify" badge on each section of the profile editor whenever a field's reported score is below 0.6 — already-editable fields, now visibly flagged. Also fixed in this pass: `app/api/profile/avatar/route.ts` was reading/writing a `profiles.parsed_data` column that has never existed in any migration (only `resumes.parsed_data` does), so avatar upload would have failed on the DB write immediately after a successful storage upload. | `lib/resume/confidence.ts`, `lib/ai/gemini.ts`, `components/dashboard/profile-editor.tsx` |
-| **1.4 Security Baseline** | RLS on every table, signed URLs only, manual two-account test | **Partially done.** RLS is correctly enabled and scoped on every table that exists (`profiles`, `job_applications`, `resumes`) — this is the strongest part of the codebase (see Section 4). But: the storage layer has a real policy bug (Flaw 1), there's no evidence a two-account cross-access test was ever run, and there are zero automated RLS tests (pgTAP or otherwise). | `supabase/migrations/20260706130000_initial_schema.sql`, `20260714000000_resume_onboarding_schema.sql` |
-| **2.x — ATS Discovery, matching, caching** | — | **Not started.** `/dashboard/jobs` is a literal `BlankPage` placeholder. No `ATSAdapter` interface, no Inngest, no `jobs`/`companies` tables. | `app/dashboard/jobs/page.tsx` |
+| **1.4 Security Baseline** | RLS on every table, signed URLs only, manual two-account test | **Done.** RLS is correctly enabled and scoped on every table that exists (`profiles`, `job_applications`, `resumes`) — this is the strongest part of the codebase (see Section 4). The storage policy bug (Flaw 1) is fixed, and the user ran the manual two-account cross-access test with no leakage found (`CHANGELOG.md` Session 7). Still no automated RLS tests (pgTAP or otherwise) — worth adding before Phase 4 (billing) raises the stakes of a leak. | `supabase/migrations/20260706130000_initial_schema.sql`, `20260714000000_resume_onboarding_schema.sql`, `20260914000000_avatars_bucket_and_storage_fixes.sql` |
+| **2.1 — ATS API Integration** | `ATSAdapter` interface + Greenhouse/Lever/Workable adapters, registered in a platform registry | **Partially done.** `lib/ats/types.ts` (interface), `lib/ats/registry.ts` (registry), and `lib/ats/adapters/greenhouse.ts` (real implementation against the public Greenhouse Job Board API) are done and tested. Lever and Workable adapters, job persistence (`jobs` table doesn't exist yet), and UI wiring are not started. `/dashboard/jobs` is still a literal `BlankPage` placeholder. | `lib/ats/` |
 | **3.x — Match scoring & filters** | — | **Not started.** No embeddings, no `pgvector`, no OpenAI integration anywhere in `package.json`. | — |
 | **4.x — Manual apply, saved jobs, billing, Stripe, usage limits** | — | **Not started.** `/dashboard/billing` is a `BlankPage`; no Stripe dependency in `package.json`; no usage/credit enforcement logic exists (only a hardcoded `creditsPlaceholder`). | `app/dashboard/billing/page.tsx` |
 | **5.x — AI Auto-Apply** | — | **Not started.** No Browserbase/Stagehand dependency, no `applied_status` state machine, `/dashboard/application-status` is a `BlankPage` even though `app/api/applications/route.ts` has working CRUD underneath it. | `app/dashboard/application-status/page.tsx` |
@@ -146,7 +148,7 @@ Not in the original plan, but the original plan's own rules (Section 2.9 Definit
 9. ☑ Stood up minimal CI (`.github/workflows/ci.yml`: lint, typecheck, unit-test, build on every PR/push to `main`/`dev`). Added Vitest (`vitest.config.ts`) with 15 passing unit tests covering `detectFileType`/`isAllowedType`, `assertResourceOwner`, and `normalizeParsedResume`. **Playwright/e2e still not added** — deferred until there's a first real user flow worth protecting, per the original note.
 10. ☑ Adopted the branch-per-task convention starting with this sprint: `phase0.5/stabilization-sprint` off `dev`, no direct commits to `dev` since.
 11. ☑ Committed the three previously-pending files (`.agents/AGENTS.md`, `profile-completeness-card.tsx`, `profile-editor.tsx`) as their own scoped commit before this branch was cut.
-12. ☐ **Still open** — the manual two-account cross-access test requires a live Supabase project and two real accounts; it cannot be run from this session. Do this before promoting anything to production.
+12. ☑ **Done** — user ran the manual two-account cross-access test against the live Supabase project; no cross-tenant leakage found. See `CHANGELOG.md` Session 7.
 
 **Two additional bugs found and fixed while doing this work (not in the original 9 flaws):**
 
@@ -158,19 +160,21 @@ Not in the original plan, but the original plan's own rules (Section 2.9 Definit
 ### Then — resume the original plan, unchanged in structure
 Once Phase 0.5 is closed:
 - ☑ Finish Phase 1.3 properly: add the confidence-score field the plan requires and make low-confidence fields visibly flagged/editable in the UI — done on `phase1/1.3-resume-confidence-scores` (`lib/resume/confidence.ts`, updated `RESUME_EXTRACTION_PROMPT`, "Please verify" badges in `profile-editor.tsx`). Also fixed in the same pass: the avatar route was writing to a `profiles.parsed_data` column that never existed in any migration, which would have broken every avatar upload immediately after a successful storage write.
-- Tag `v1.0-phase1-complete`, then proceed to Phase 2 (ATS integration) exactly as written in `project (1).md` — that plan's Phase 2–8 structure, adapter-interface pattern, and cross-cutting requirements are sound and don't need revision, only a stable foundation under them. **Still blocking the tag:** the manual two-account cross-access test (needs a live Supabase project with two real accounts) and Groq key rotation — both require human/console access this session doesn't have.
+- ☑ **Phase 1 gate cleared.** User rotated the Groq key, applied the avatars-bucket migration, and ran the manual two-account cross-tenant test with no leakage found (see `CHANGELOG.md` Session 7). `v1.0-phase1-complete` can now be tagged; Phase 2 is unblocked per the plan's own gate rule.
+- Phase 2 (ATS integration) has started: `lib/ats/` — the `ATSAdapter` interface, registry, and a real Greenhouse adapter (public API, no credentials needed) — merged to `dev`/`main` in Session 6–7. Remaining Phase 2 tasks (Lever/Workable adapters, company token discovery, caching, classification, company metadata) proceed exactly as written in `project (1).md` — that plan's structure, adapter pattern, and cross-cutting requirements are sound and don't need revision.
 
 ### Task Tracking (replaces Section 14 of the plan, reflects reality)
 
 | Phase | Task | Status |
 |---|---|---|
-| 0 | 0.1–0.5 (repo/CI/CD bootstrap) | ☐ Not started |
-| 0.5 | Stabilization sprint (this document, items 1–12) | ◐ 11/12 done — only the live two-account test and real key rotation remain, both requiring human/console access |
+| 0 | 0.1–0.5 (repo/CI/CD bootstrap) | ◐ CI pipeline exists (`0.2`); branch protection, CD pipelines, staged environments (`0.1`, `0.3`–`0.5`) not started |
+| 0.5 | Stabilization sprint (this document, items 1–12) | ☑ 12/12 done |
 | 1 | 1.1 Dashboard Layout | ☑ Done |
 | 1 | 1.2 Authentication | ☑ Done |
 | 1 | 1.3 Onboarding & Resume Parsing | ☑ Done — confidence scoring, signed URLs, avatar `parsed_data` bug fixed |
-| 1 | 1.4 Security Baseline | ◐ Partial — RLS solid, storage bug, no two-account test run |
-| 2–8 | Everything else | ☐ Not started |
+| 1 | 1.4 Security Baseline | ☑ Done — RLS solid, storage bug fixed, two-account test passed |
+| 2 | 2.1 ATS API Integration | ◐ Greenhouse adapter done; Lever/Workable adapters not started |
+| 2 | 2.2–2.5, 3–8 | ☐ Not started |
 
 ---
 
