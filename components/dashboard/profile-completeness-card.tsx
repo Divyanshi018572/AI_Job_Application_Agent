@@ -45,8 +45,10 @@ export function ProfileCompletenessCard({
     const hasProjects =
       Array.isArray(profileData.projects) && profileData.projects.length > 0
     const hasCertifications =
-      Array.isArray(profileData.certifications) &&
-      profileData.certifications.length > 0
+      (Array.isArray(profileData.certifications) &&
+        profileData.certifications.length > 0) ||
+      (Array.isArray(profileData.achievements) &&
+        profileData.achievements.length > 0)
     const hasPreferences =
       Boolean(profileData.careerPreferences?.availability) ||
       Boolean(profileData.careerPreferences?.jobTypes?.length) ||
