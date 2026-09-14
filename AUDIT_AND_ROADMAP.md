@@ -131,20 +131,29 @@ This is explicitly what Phase 6.5 ("Hallucination Guardrails") is meant to solve
 ## 5. Revised Roadmap
 
 ### Phase 0.5 — Stabilization Sprint (NEW — do this before touching Phase 2)
-Not in the original plan, but the original plan's own rules (Section 2.9 Definition of Done, Section 5.4's Phase 1 gate) haven't been satisfied yet, so this has to happen first:
+Not in the original plan, but the original plan's own rules (Section 2.9 Definition of Done, Section 5.4's Phase 1 gate) haven't been satisfied yet, so this has to happen first.
 
-1. Rotate the Groq key (Flaw 3); sanitize `.env.example`; fix `.gitignore`.
-2. Fix the avatar bucket + RLS folder mismatch (Flaw 1); add the missing migration.
-3. Switch resume file access to signed URLs (Flaw 2).
-4. Replace the mass-assignment retry loop with an explicit schema-validated update path (Flaw 4).
-5. Add MIME/magic-byte validation to both upload routes (Flaw 5).
-6. Delete or lock down `createAdminClient()` until an Inngest function actually needs it (Flaw 6).
-7. Add an interim per-user rate limit on resume upload/parsing (Flaw 7).
-8. Add prompt-delimiter guardrail to `RESUME_EXTRACTION_PROMPT` (Flaw 8).
-9. Stand up **minimal** CI now — `lint` + `typecheck` + `build` on every PR is enough to start; add Vitest and write tests for the logic that's already in production and untested (`normalizeParsedResume`, `requireUser`, `assertResourceOwner`, the profile update allowlist). Add Playwright once there's a first real user flow worth protecting.
-10. Retroactively adopt the plan's branch-per-task convention starting now: stop committing to `dev` directly, open the next task as `phase1/1.3-fix-resume-links` or similar, and route it through a PR even without a hosted CI runner blocking merge yet.
-11. Commit the three currently-pending files (`.agents/AGENTS.md`, `profile-completeness-card.tsx`, `profile-editor.tsx`) as their own scoped commit.
-12. Run the plan's Phase 1 gate for real: a manual two-account cross-access test, using two live accounts, confirming neither can see the other's profile/resume/application data.
+**Status as of 2026-09-14 (branch `phase0.5/stabilization-sprint`):**
+
+1. ☑ Rotated Groq key placeholder in `.env.example`; fixed `.gitignore` to un-ignore it (Flaw 3). **The real key itself still needs rotating in the Groq console by a human with account access — that step could not be done from this session.**
+2. ☑ Fixed the avatar bucket + RLS folder mismatch (Flaw 1): added `supabase/migrations/20260914000000_avatars_bucket_and_storage_fixes.sql` creating a public `avatars` bucket with folder-scoped write RLS matching the actual upload path; rewrote `app/api/profile/avatar/route.ts` to upload directly there and removed the base64-fallback.
+3. ☑ Switched resume file access to signed URLs (Flaw 2): `app/api/resumes/route.ts` and `app/api/resumes/upload/route.ts` now call `createSignedUrl()` fresh on every read/upload instead of `getPublicUrl()` on the private bucket.
+4. ☑ Replaced the mass-assignment retry loop in `app/api/profile/route.ts` with a single update attempt that surfaces schema-mismatch errors instead of silently dropping fields (Flaw 4).
+5. ☑ Added `lib/security/file-validation.ts` (magic-byte detection) and wired it into both upload routes (Flaw 5).
+6. ☑ Locked down `createAdminClient()` (Flaw 6): added an ESLint `no-restricted-imports` rule blocking it from `app/api/**`, plus a doc comment explaining the boundary.
+7. ☑ Added an interim rate limit (5 uploads/user/hour) to `app/api/resumes/upload/route.ts` (Flaw 7).
+8. ☑ Added an untrusted-data delimiter + instruction to `RESUME_EXTRACTION_PROMPT` in `lib/ai/gemini.ts` (Flaw 8).
+9. ☑ Stood up minimal CI (`.github/workflows/ci.yml`: lint, typecheck, unit-test, build on every PR/push to `main`/`dev`). Added Vitest (`vitest.config.ts`) with 15 passing unit tests covering `detectFileType`/`isAllowedType`, `assertResourceOwner`, and `normalizeParsedResume`. **Playwright/e2e still not added** — deferred until there's a first real user flow worth protecting, per the original note.
+10. ☑ Adopted the branch-per-task convention starting with this sprint: `phase0.5/stabilization-sprint` off `dev`, no direct commits to `dev` since.
+11. ☑ Committed the three previously-pending files (`.agents/AGENTS.md`, `profile-completeness-card.tsx`, `profile-editor.tsx`) as their own scoped commit before this branch was cut.
+12. ☐ **Still open** — the manual two-account cross-access test requires a live Supabase project and two real accounts; it cannot be run from this session. Do this before promoting anything to production.
+
+**Two additional bugs found and fixed while doing this work (not in the original 9 flaws):**
+
+- **`pdf-parse` v2 API break.** `package.json` pins `pdf-parse@^2.4.5`, but the upload route was calling the old v1 API (`(await import("pdf-parse")).default(buffer)` returning `{ text }`). v2 replaced this with a `PDFParse` class (`new PDFParse({ data }).getText()`). The old call always threw, was always silently caught, and `extractedText` was always empty for every PDF resume ever uploaded — meaning the Groq fallback (which requires non-empty `extractedText`) could never trigger for a PDF resume, even though PDFs are presumably the majority of uploads. Fixed in `app/api/resumes/upload/route.ts` to use the real v2 API. This is exactly the class of bug this repo's own `AGENTS.md` warns about ("this is NOT the Next.js you know... read the docs before writing code") — same lesson applies to every dependency, not just Next.js itself.
+- **`middleware.ts` used a deprecated Next.js 16 file convention.** The production build emitted `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` This file is the single gate enforcing every auth rule in `SECURITY.md` Section 6, so it was renamed to `proxy.ts` (exported function renamed `middleware` → `proxy`) per `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md`. Confirmed via a from-scratch build (no `.env.local`, placeholder env vars only) that this didn't change behavior. That doc also flags something worth carrying forward: Server Functions aren't separate routes in Proxy's execution chain, so a matcher change can silently stop covering one — auth should never be enforced by Proxy alone once Server Functions are in use.
+
+**Verification run at the end of this sprint (all green):** `npm run lint` (0 errors, 2 deliberately-downgraded warnings — see `eslint.config.mjs` comment on `react-hooks/set-state-in-effect`), `npm run typecheck`, `npm run test:unit` (15/15 passing), `npm run build` (clean, including a build with no `.env.local` to simulate CI).
 
 ### Then — resume the original plan, unchanged in structure
 Once Phase 0.5 is closed:
@@ -156,7 +165,7 @@ Once Phase 0.5 is closed:
 | Phase | Task | Status |
 |---|---|---|
 | 0 | 0.1–0.5 (repo/CI/CD bootstrap) | ☐ Not started |
-| 0.5 | Stabilization sprint (this document, items 1–12) | ☐ Not started |
+| 0.5 | Stabilization sprint (this document, items 1–12) | ◐ 11/12 done — only the live two-account test and real key rotation remain, both requiring human/console access |
 | 1 | 1.1 Dashboard Layout | ☑ Done |
 | 1 | 1.2 Authentication | ☑ Done |
 | 1 | 1.3 Onboarding & Resume Parsing | ◐ Partial — broken links + missing confidence scoring |
