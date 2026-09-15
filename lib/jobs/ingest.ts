@@ -1,5 +1,6 @@
 import { getAdapter, type ATSPlatform } from "@/lib/ats/registry"
 import type { RawJob } from "@/lib/ats/types"
+import { findCompanyByBoard } from "@/lib/companies/lookup"
 import { withRetry } from "@/lib/http/retry"
 import { classifyJob } from "@/lib/jobs/classify"
 import { mapWithConcurrency } from "@/lib/jobs/concurrency"
@@ -35,9 +36,9 @@ export interface IngestOptions {
   userId: string
   platform: ATSPlatform
   boardToken: string
-  /** Overrides the display name Greenhouse/Lever adapters otherwise fall
-   * back to (the board token itself) — e.g. a real name resolved via
-   * discovery (Task 2.2) or a curated companies entry (Task 2.5). */
+  /** Display name to save on the jobs. Without it, a curated company's name
+   * is used (Task 2.5), else the adapter's — for Greenhouse/Lever that's
+   * the board token itself. */
   companyDisplayName?: string
   cacheWindowHours?: number
   batchSize?: number
@@ -223,13 +224,18 @@ export async function ingestJobsForCompany(
     })
     jobsFetched = rawJobs.length
 
+    // Curated boards (Task 2.5) get their real name and a company_id for
+    // the size/tier tag. A name the user typed still wins.
+    const company = await findCompanyByBoard(supabase, options.platform, options.boardToken)
+
     const fetchedAt = new Date().toISOString()
     const rows = rawJobs.map((job) => ({
       user_id: options.userId,
       platform: job.platform,
       board_token: options.boardToken,
       title: job.title,
-      company: options.companyDisplayName ?? job.company,
+      company: options.companyDisplayName ?? company?.name ?? job.company,
+      company_id: company?.id ?? null,
       location: job.location ?? null,
       description: job.description ?? null,
       job_url: job.jobUrl,

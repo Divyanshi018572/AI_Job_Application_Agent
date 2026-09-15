@@ -19,6 +19,8 @@ export type Database = {
           domain: string | null
           company_type: string | null
           employee_count_range: string | null
+          ats_platform: string | null
+          board_token: string | null
           source: string
           created_at: string
         }
@@ -28,6 +30,8 @@ export type Database = {
           domain?: string | null
           company_type?: string | null
           employee_count_range?: string | null
+          ats_platform?: string | null
+          board_token?: string | null
           source?: string
           created_at?: string
         }
@@ -37,6 +41,8 @@ export type Database = {
           domain?: string | null
           company_type?: string | null
           employee_count_range?: string | null
+          ats_platform?: string | null
+          board_token?: string | null
           source?: string
           created_at?: string
         }
@@ -130,7 +136,15 @@ export type Database = {
           fetched_at?: string
           created_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "jobs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       job_applications: {
         Row: {
