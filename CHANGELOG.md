@@ -20,12 +20,16 @@ Running record of every change made to this repo across agent sessions, kept in 
 | 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | ✅ **Done** (PR #11) |
 | 11 | Merge the Session 14 PR (`phase0/0.3-e2e-and-0.4-deploy-pipelines` → `dev`) **after** #10 | Stacked on the Session 13 branch; needs GitHub UI | ✅ **Done** (PR #12; CI on `dev` green incl. `e2e`; Deploy staging correctly *skipped*) |
 | 12 | Create an E2E test user + 4 `E2E_*` GitHub secrets (`docs/DEPLOYMENT.md` step 1) | Needs your Supabase dashboard + repo admin | ◐ **In progress**: test user created and working locally (19/19). Rotate it first (row 18), then add the 4 GitHub secrets |
-| 13 | Vercel project, env vars, token; GitHub vars/secrets; `staging` + `production` environments with you as required reviewer (`docs/DEPLOYMENT.md` steps 2–4) | Account creation and secrets can't be done from agent sessions | **Open**; deploy workflows stay *skipped* until then |
+| 13 | Vercel project, env vars, token; GitHub vars/secrets; `staging` + `production` environments with you as required reviewer (`docs/DEPLOYMENT.md` steps 2–4) | Account creation and secrets can't be done from agent sessions | **Deferred to the end** (user decision, 2026-09-15). Deploy workflows stay *skipped* meanwhile; phase gates that need staging wait for it |
 | 14 | (Optional) One-time `supabase migration repair` + `SUPABASE_DB_URL`/`SUPABASE_DB_PUSH` to automate migrations (`docs/DEPLOYMENT.md` step 5) | Needs your database password | **Optional**; supersedes row 5 |
 | 15 | Branch protection on `dev` and `main` with required checks `lint`, `typecheck`, `unit-test`, `build`, `e2e` (`docs/DEPLOYMENT.md` step 6) | Repo admin | **Open** (plan Task 0.1) |
-| 16 | Apply `supabase/migrations/20260916000000_companies_board_tokens_and_seed.sql` in the SQL Editor | Manual migrations | **Open**. Either order vs. merging is safe: without it, jobs just get no tags or real names |
-| 17 | Merge the Session 15 PR (`phase2/2.5-company-metadata-table` → `dev`) | Needs GitHub UI | **Open** |
+| 16 | Apply `supabase/migrations/20260916000000_companies_board_tokens_and_seed.sql` in the SQL Editor | Manual migrations | ✅ **Done** (PR #13 merged; `board_token` confirmed live) |
+| 17 | Merge the Session 15 PR (`phase2/2.5-company-metadata-table` → `dev`) | Needs GitHub UI | ✅ **Done** (PR #13 merged; `board_token` confirmed live) |
 | 18 | **Rotate the E2E test user**: delete it in Supabase → Authentication → Users, recreate it (Auto Confirm) with a new password, and update `.env.local` and the GitHub secrets | A pasted Playwright log contained that user's live session cookie (access + refresh token) | **Open**, do this before adding the GitHub secrets |
+| 19 | Merge the fix PR (`fix/auth-retry-and-local-e2e` → `dev`) | Its 3 commits were pushed after PR #13 merged, so they're not in `dev` yet | **Open** |
+| 20 | Apply `supabase/migrations/20260917000000_company_discoveries.sql` **before** merging the 2.2 PR | Without it, discovery still works but has no review queue, cache or hourly search cap (a cost guard) | **Open** |
+| 21 | Merge the 2.2 PR (`phase2/2.2-discovery-ui` → `dev`) **after** #19 | Stacked on the fix branch | **Open** |
+| 22 | Review discovered companies now and then (SQL at the bottom of the 20260917 migration) | Promoting a board into the shared curated list is a human decision | **Ongoing**, optional |
 
 ---
 
@@ -345,11 +349,65 @@ The user created the E2E test account and ran `npm run test:e2e`. The 12 public 
 
 ---
 
+## Session 17 — Task 2.2: Find a Company by Name
+
+The user chose to leave Vercel until the end, and that works: deploys stay *skipped*, and only the staging checks at each phase gate wait for it.
+
+The user merged PR #13 and the company migration was confirmed live. The three Session 16 fix commits had been pushed after that merge, so they moved to `fix/auth-retry-and-local-e2e`.
+
+Branch `phase2/2.2-discovery-ui` is stacked on that fix branch.
+
+**Two problems found by testing live, before building the UI:**
+1. **The plan's search query didn't work.** `"<company> careers greenhouse OR lever OR workable"` returned Reddit, Google and gao.gov for "Mozilla", because search APIs don't honour `OR`. Restricting results to the job-board domains found Mozilla's and Canonical's real boards.
+2. **Domain-restricted search surfaced other companies' real boards.** "Chainalysis" returned `chainlabs`, and "Notion" returned Huzzle and Customer.io, companies whose postings mention Notion. Those boards have open jobs, so a live check alone would have shown users the wrong company's jobs.
+
+**The fix:** a board found by search counts only if **the name it displays matches**, by whole leading words ("Oscar" ↔ "Oscar Health" matches, "Box" ↔ "Dropbox" doesn't), **and it lists at least one open job**. The name comes from a new `ATSAdapter.fetchBoardName`: Greenhouse's board API, Workable's account name, and Lever's board-page title.
+
+**After the fix, live:**
+
+| Company | Result |
+|---|---|
+| Mozilla | `greenhouse/mozilla` ✅ |
+| Canonical | `greenhouse/canonical` ✅ |
+| Chainalysis | not found ✅ |
+| Notion | not found ✅ |
+| Zapier | not found (probably an unsupported ATS, so the user gets paste-a-link) |
+
+Each search took 6–8 seconds.
+
+**What changed:**
+- `0318f1e` discovery:
+  - the domain-restricted search and the name check;
+  - `parseBoardUrl`, covering Greenhouse embed/API URLs, Lever EU/API URLs, and Workable's own subdomains, and rejecting non-http(s) links and odd tokens;
+  - curated-name matching that ignores punctuation and legal suffixes.
+- `8415ad6` `POST /api/companies/discover`:
+  - **Lookup order:** curated list → this user's earlier verified result → web search. A pasted link is checked instead when one is given.
+  - **Recording:** each search result or pasted link goes into the new `company_discoveries` table, pending review. This is the plan's "add to curated list / flag for review"; users can't write to the shared `companies` table.
+  - **Limits:** 10 searches or link checks per user per hour. Curated and cached hits are free.
+- `68a5a9f` Jobs page:
+  - **"Company name → Find jobs"** is the main flow, with a paste-a-link form when nothing is found.
+  - The token form moves under "Enter a board token instead".
+
+**Security of `company_discoveries`**, tested on Postgres 16 with real PostgREST:
+- Own-row insert: 201.
+- Refused: inserting for another user, inserting a pre-approved row, updating (self-approval), deleting, and reading while logged out. Users see only their own rows.
+- Update, delete and truncate are also revoked explicitly, since Supabase grants new tables to `anon` and `authenticated` by default.
+- A pasted link is never fetched itself. Only its parsed token is sent, to the platform's own API.
+
+**Verified:**
+- Vitest 237/237 (43 new). Each commit passes typecheck and tests on its own (225 → 237 → 237).
+- Playwright 23/23 on a production build, including 3 new name-search UI specs and the new route's logged-out 401.
+- 12 real Tavily searches used in total.
+
+---
+
 ## Current Repo State (as of this entry)
 
-- `dev`: everything through Session 14. CI green (including `e2e`).
-- Open branch: `phase2/2.5-company-metadata-table` (Sessions 15–16: company seed, auth-check retry, local E2E fix). Apply `20260916000000_companies_board_tokens_and_seed.sql`, then merge; either order is safe.
+- `dev`: everything through Session 15 (PR #13). CI green.
+- Open branches, merge in this order:
+  1. `fix/auth-retry-and-local-e2e` (Session 16 fixes).
+  2. `phase2/2.2-discovery-ui` (Session 17), stacked on 1. Apply `20260917000000_company_discoveries.sql` first.
 - `main`: missing everything since Session 9 — your call when to release.
 - Phase 0 (Bootstrap): CI (0.2) done; E2E (0.3), CD (0.4) and the environments/config check (0.5) are built and verified locally, and go live once the manual setup in `docs/DEPLOYMENT.md` is done. Branch protection (0.1) is still a manual step.
 - Phase 1 (Foundation & Security): **✅ complete**, tagged `v1.0-phase1-complete`.
-- Phase 2 (Core Discovery): 2.1, 2.4 and 2.5 done. 2.3 is done except the cross-user per-platform concurrency cap, which needs a job queue such as Inngest. 2.2's discovery logic is done and now uses the 124 verified boards; typing a company name in the UI is the next step.
+- Phase 2 (Core Discovery): 2.1, 2.2 (once its PR merges), 2.4 and 2.5 done. 2.3 is done except the cross-user per-platform concurrency cap, which needs a job queue such as Inngest. The Phase 2 gate (tag `v2.0`, load-check on staging, promote) waits for Vercel.

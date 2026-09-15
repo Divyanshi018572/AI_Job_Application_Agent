@@ -56,10 +56,17 @@ export interface SubmissionResult {
 }
 
 export interface ATSAdapter {
+  /** Domain this platform's job boards live on — company discovery
+   * (Task 2.2) restricts web searches to these. */
+  searchDomain: string
   /** True if this adapter knows how to handle the given job/board URL. */
   detectPlatform(url: string): boolean
   /** Fetch every open posting for a given company token/board id. */
   fetchJobs(token: string): Promise<RawJob[]>
+  /** The company name the board itself displays, or null if it can't be
+   * read. Discovery uses it to confirm a board found by search belongs to
+   * the company searched for, not one that merely mentions it. */
+  fetchBoardName(token: string): Promise<string | null>
   /** Phase 5 scope — submits an application through this platform. */
   submitApplication(job: Job, profile: Profile): Promise<SubmissionResult>
 }

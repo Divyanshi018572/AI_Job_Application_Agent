@@ -6,6 +6,16 @@ import type { ATSAdapter, Job, Profile, RawJob, SubmissionResult } from "@/lib/a
  * https://github.com/lever/postings-api
  */
 const LEVER_API_BASE = "https://api.lever.co/v0/postings"
+const LEVER_BOARD_BASE = "https://jobs.lever.co"
+
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+}
 
 interface LeverPosting {
   id: string
@@ -44,6 +54,8 @@ function mapLeverPosting(posting: LeverPosting, companyToken: string): RawJob {
 }
 
 export const leverAdapter: ATSAdapter = {
+  searchDomain: "lever.co",
+
   detectPlatform(url: string): boolean {
     try {
       const host = new URL(url).hostname
@@ -72,6 +84,19 @@ export const leverAdapter: ATSAdapter = {
     if (!Array.isArray(data)) return []
 
     return (data as LeverPosting[]).map((posting) => mapLeverPosting(posting, token))
+  },
+
+  // Lever's postings API has no company name; the hosted board page's
+  // <title> is the company's display name (e.g. "Palantir Technologies").
+  async fetchBoardName(token: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${LEVER_BOARD_BASE}/${encodeURIComponent(token)}`)
+      if (!res.ok) return null
+      const title = (await res.text()).match(/<title>([^<]{1,200})<\/title>/i)?.[1]
+      return title ? decodeBasicEntities(title).trim() || null : null
+    } catch {
+      return null
+    }
   },
 
   async submitApplication(_job: Job, _profile: Profile): Promise<SubmissionResult> {

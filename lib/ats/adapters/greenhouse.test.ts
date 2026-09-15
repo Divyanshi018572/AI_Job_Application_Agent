@@ -111,3 +111,24 @@ describe("greenhouseAdapter.submitApplication", () => {
     expect(result.message).toMatch(/not implemented/i)
   })
 })
+
+describe("greenhouseAdapter.fetchBoardName", () => {
+  it("returns the name the board displays", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ name: "Acme Corp", content: "" }) })
+    vi.stubGlobal("fetch", fetchMock)
+
+    expect(await greenhouseAdapter.fetchBoardName("acme")).toBe("Acme Corp")
+    expect(fetchMock).toHaveBeenCalledWith("https://boards-api.greenhouse.io/v1/boards/acme")
+  })
+
+  it("returns null for an unknown board, a missing name, or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) }))
+    expect(await greenhouseAdapter.fetchBoardName("nope")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ name: "  " }) }))
+    expect(await greenhouseAdapter.fetchBoardName("acme")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))
+    expect(await greenhouseAdapter.fetchBoardName("acme")).toBeNull()
+  })
+})

@@ -5,8 +5,10 @@ import {
   Briefcase,
   ExternalLink,
   Loader2,
+  Link2,
   MapPin,
   Plus,
+  Search,
   Sparkles,
 } from "lucide-react"
 
@@ -56,11 +58,17 @@ interface IngestResponse {
   error?: string
 }
 
+type DiscoverResponse =
+  | { status: "found"; companyName: string; platform: string; token: string }
+  | { status: "not_found"; companyName: string; reason: string }
+
 const PLATFORMS = [
   { value: "greenhouse", label: "Greenhouse" },
   { value: "lever", label: "Lever" },
   { value: "workable", label: "Workable" },
 ] as const
+
+const platformLabel = (value: string) => PLATFORMS.find((p) => p.value === value)?.label ?? value
 
 export function JobsListView() {
   const [jobs, setJobs] = React.useState<JobRow[]>([])
@@ -76,6 +84,12 @@ export function JobsListView() {
    * tags — drives the "Tag more" button. */
   const [lastBoard, setLastBoard] = React.useState<BoardRef | null>(null)
   const [pendingCount, setPendingCount] = React.useState(0)
+  const [companyQuery, setCompanyQuery] = React.useState("")
+  const [discovering, setDiscovering] = React.useState(false)
+  /** Set when a name search found no board: shows the paste-a-link form. */
+  const [notFound, setNotFound] = React.useState<{ companyName: string; reason: string } | null>(null)
+  const [careersUrl, setCareersUrl] = React.useState("")
+  const busy = ingesting || discovering
 
   const fetchJobs = React.useCallback(async () => {
     setLoading(true)
@@ -98,7 +112,7 @@ export function JobsListView() {
   /** Fetches the board (unless fetched in the last 6 hours) and tags the
    * next batch of its untagged jobs. Calling it again for the same board is
    * how "Tag more" works. */
-  async function runIngest(board: BoardRef, isTagMore: boolean): Promise<boolean> {
+  async function runIngest(board: BoardRef, isTagMore: boolean, prefix = ""): Promise<boolean> {
     setIngesting(true)
     setErrorMessage("")
     setWarningMessage("")
@@ -127,7 +141,7 @@ export function JobsListView() {
       const tagged = `Tagged ${data.jobsClassified}${
         data.pendingClassification > 0 ? `, ${data.pendingClassification} still untagged` : ""
       }.`
-      setStatusMessage(saved + tagged)
+      setStatusMessage(prefix + saved + tagged)
       setTimeout(() => setStatusMessage(""), 6000)
 
       // Not auto-dismissed: repeated classification failures usually mean a
@@ -147,6 +161,64 @@ export function JobsListView() {
       return false
     } finally {
       setIngesting(false)
+    }
+  }
+
+  /** Finds the company's board (by name, or from a pasted link), then
+   * fetches its jobs. A name with no board opens the paste-a-link form. */
+  async function runDiscovery(payload: { companyName: string; careersUrl?: string }): Promise<boolean> {
+    setDiscovering(true)
+    setErrorMessage("")
+    setWarningMessage("")
+    setStatusMessage(
+      payload.careersUrl ? "Checking that link..." : `Looking for ${payload.companyName}'s job board...`
+    )
+
+    try {
+      const res = await fetch("/api/companies/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const data = (await res.json()) as DiscoverResponse & { error?: string }
+      if (!res.ok) throw new Error(data.error || "Company search failed")
+
+      if (data.status === "not_found") {
+        setStatusMessage("")
+        setNotFound({ companyName: data.companyName, reason: data.reason })
+        return false
+      }
+
+      setNotFound(null)
+      setCareersUrl("")
+      setDiscovering(false)
+      return await runIngest(
+        { platform: data.platform, boardToken: data.token, companyDisplayName: data.companyName },
+        false,
+        `Found ${data.companyName} on ${platformLabel(data.platform)}. `
+      )
+    } catch (err: unknown) {
+      setStatusMessage("")
+      setErrorMessage(err instanceof Error ? err.message : "Company search failed")
+      return false
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  async function handleFindCompany(e: React.FormEvent) {
+    e.preventDefault()
+    const companyName = companyQuery.trim()
+    if (!companyName) return
+    setNotFound(null)
+    if (await runDiscovery({ companyName })) setCompanyQuery("")
+  }
+
+  async function handleUseLink(e: React.FormEvent) {
+    e.preventDefault()
+    if (!notFound || !careersUrl.trim()) return
+    if (await runDiscovery({ companyName: notFound.companyName, careersUrl: careersUrl.trim() })) {
+      setCompanyQuery("")
     }
   }
 
@@ -177,56 +249,97 @@ export function JobsListView() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="mb-4 text-xs text-slate-500">
-            Enter a company&apos;s ATS board token (the part of their careers
-            URL after the platform domain — e.g. for{" "}
-            <code className="rounded bg-slate-100 px-1">
-              boards.greenhouse.io/acme
-            </code>
-            , the token is <code className="rounded bg-slate-100 px-1">acme</code>).
-          </p>
-          <form
-            onSubmit={handleAddCompany}
-            className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_1fr_1fr_auto]"
-          >
-            <Select
-              value={platform}
-              onValueChange={(value) => {
-                if (value) setPlatform(value)
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Platform" />
-              </SelectTrigger>
-              <SelectContent>
-                {PLATFORMS.map((p) => (
-                  <SelectItem key={p.value} value={p.value}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <form onSubmit={handleFindCompany} className="flex flex-col gap-3 sm:flex-row">
             <Input
-              placeholder="Board token (e.g. acme)"
-              value={boardToken}
-              onChange={(e) => setBoardToken(e.target.value)}
-              disabled={ingesting}
+              aria-label="Company name"
+              placeholder="Company name, e.g. Stripe"
+              value={companyQuery}
+              onChange={(e) => setCompanyQuery(e.target.value)}
+              maxLength={100}
+              disabled={busy}
             />
-            <Input
-              placeholder="Display name (optional)"
-              value={companyDisplayName}
-              onChange={(e) => setCompanyDisplayName(e.target.value)}
-              disabled={ingesting}
-            />
-            <Button type="submit" disabled={ingesting || !boardToken.trim()}>
-              {ingesting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Plus className="size-4" />
-              )}
-              Fetch Jobs
+            <Button type="submit" disabled={busy || !companyQuery.trim()}>
+              {discovering ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+              Find jobs
             </Button>
           </form>
+          <p className="mt-2 text-xs text-slate-500">
+            Finds the company&apos;s Greenhouse, Lever or Workable job board — checked against a
+            list of verified companies first, then searched and verified live.
+          </p>
+
+          {notFound && (
+            <form
+              onSubmit={handleUseLink}
+              className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+            >
+              <p className="text-sm text-slate-700">{notFound.reason}</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  type="url"
+                  aria-label="Job board link"
+                  placeholder="https://boards.greenhouse.io/company/jobs/123"
+                  value={careersUrl}
+                  onChange={(e) => setCareersUrl(e.target.value)}
+                  maxLength={500}
+                  disabled={busy}
+                />
+                <Button type="submit" variant="outline" disabled={busy || !careersUrl.trim()}>
+                  <Link2 className="size-4" />
+                  Use this link
+                </Button>
+              </div>
+            </form>
+          )}
+
+          <details className="mt-4 rounded-lg border border-slate-200 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-slate-600">
+              Enter a board token instead
+            </summary>
+            <p className="mb-3 mt-2 text-xs text-slate-500">
+              The part of the careers URL after the platform domain — e.g. for{" "}
+              <code className="rounded bg-slate-100 px-1">boards.greenhouse.io/acme</code>, the
+              token is <code className="rounded bg-slate-100 px-1">acme</code>.
+            </p>
+            <form
+              onSubmit={handleAddCompany}
+              className="grid grid-cols-1 gap-3 pb-1 sm:grid-cols-[160px_1fr_1fr_auto]"
+            >
+              <Select
+                value={platform}
+                onValueChange={(value) => {
+                  if (value) setPlatform(value)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Platform" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLATFORMS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Board token (e.g. acme)"
+                value={boardToken}
+                onChange={(e) => setBoardToken(e.target.value)}
+                disabled={busy}
+              />
+              <Input
+                placeholder="Display name (optional)"
+                value={companyDisplayName}
+                onChange={(e) => setCompanyDisplayName(e.target.value)}
+                disabled={busy}
+              />
+              <Button type="submit" disabled={busy || !boardToken.trim()}>
+                {ingesting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                Fetch Jobs
+              </Button>
+            </form>
+          </details>
 
           {statusMessage && (
             <p className="mt-3 text-sm font-medium text-emerald-600">

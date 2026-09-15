@@ -38,6 +38,11 @@ async function skipOnboarding(page: Page) {
   await page.route("**/api/resumes", (route) => json(route, { resumes: [] }))
 }
 
+/** The token form sits in a collapsed "Enter a board token instead" section. */
+async function openTokenForm(page: Page) {
+  await page.getByText("Enter a board token instead").click()
+}
+
 async function login(page: Page) {
   await page.goto("/login")
   await page.locator("#email").fill(email!)
@@ -137,6 +142,7 @@ test.describe("jobs page", () => {
 
     await login(page)
     await page.goto("/dashboard/jobs")
+    await openTokenForm(page)
     await page.getByPlaceholder("Board token (e.g. acme)").fill("acme")
     await page.getByRole("button", { name: "Fetch Jobs" }).click()
 
@@ -169,6 +175,7 @@ test.describe("jobs page", () => {
 
     await login(page)
     await page.goto("/dashboard/jobs")
+    await openTokenForm(page)
     await page.getByPlaceholder("Board token (e.g. acme)").fill("acme")
     await page.getByRole("button", { name: "Fetch Jobs" }).click()
 
@@ -184,11 +191,86 @@ test.describe("jobs page", () => {
 
     await login(page)
     await page.goto("/dashboard/jobs")
+    await openTokenForm(page)
     const tokenInput = page.getByPlaceholder("Board token (e.g. acme)")
     await tokenInput.fill("acmee")
     await page.getByRole("button", { name: "Fetch Jobs" }).click()
 
     await expect(page.getByText(/board not found/)).toBeVisible()
     await expect(tokenInput).toHaveValue("acmee")
+  })
+})
+
+test.describe("find a company by name (Task 2.2)", () => {
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page)
+    await page.route("**/api/jobs", (route) => json(route, { jobs: [] }))
+  })
+
+  const ingested = { status: "fetched", jobsFetched: 5, jobsUpserted: 5, jobsClassified: 5, pendingClassification: 0, classificationFailures: 0 }
+
+  test("finds the board and fetches its jobs", async ({ page }) => {
+    await page.route("**/api/companies/discover", (route) => {
+      expect(route.request().postDataJSON()).toEqual({ companyName: "stripe" })
+      return json(route, { status: "found", source: "curated", companyName: "Stripe", platform: "greenhouse", token: "stripe" })
+    })
+    await page.route("**/api/jobs/ingest", (route) => {
+      expect(route.request().postDataJSON()).toEqual({ platform: "greenhouse", boardToken: "stripe", companyDisplayName: "Stripe" })
+      return json(route, ingested, 201)
+    })
+
+    await login(page)
+    await page.goto("/dashboard/jobs")
+    await page.getByLabel("Company name").fill("stripe")
+    await page.getByRole("button", { name: "Find jobs" }).click()
+
+    await expect(page.getByText("Found Stripe on Greenhouse. Saved 5 jobs. Tagged 5.")).toBeVisible()
+    await expect(page.getByLabel("Company name")).toHaveValue("")
+  })
+
+  test("offers a paste-a-link fallback when no board is found", async ({ page }) => {
+    const requests: unknown[] = []
+    await page.route("**/api/companies/discover", (route) => {
+      const body = route.request().postDataJSON()
+      requests.push(body)
+      return body.careersUrl
+        ? json(route, { status: "found", source: "manual", companyName: "Ghost Corp", platform: "lever", token: "ghostcorp" })
+        : json(route, { status: "not_found", companyName: "Ghost Corp", reason: `Couldn't find a job board for "Ghost Corp". Paste a link instead.` })
+    })
+    await page.route("**/api/jobs/ingest", (route) => json(route, ingested, 201))
+
+    await login(page)
+    await page.goto("/dashboard/jobs")
+    await page.getByLabel("Company name").fill("Ghost Corp")
+    await page.getByRole("button", { name: "Find jobs" }).click()
+
+    await expect(page.getByText(/Couldn't find a job board for "Ghost Corp"/)).toBeVisible()
+    await page.getByLabel("Job board link").fill("https://jobs.lever.co/ghostcorp/123")
+    await page.getByRole("button", { name: "Use this link" }).click()
+
+    await expect(page.getByText("Found Ghost Corp on Lever. Saved 5 jobs. Tagged 5.")).toBeVisible()
+    await expect(page.getByLabel("Job board link")).toBeHidden()
+    expect(requests).toEqual([
+      { companyName: "Ghost Corp" },
+      { companyName: "Ghost Corp", careersUrl: "https://jobs.lever.co/ghostcorp/123" },
+    ])
+  })
+
+  test("shows the reason when a pasted link is rejected, and keeps it for editing", async ({ page }) => {
+    await page.route("**/api/companies/discover", (route) =>
+      route.request().postDataJSON().careersUrl
+        ? json(route, { error: "That link isn't a Greenhouse, Lever or Workable job board." }, 422)
+        : json(route, { status: "not_found", companyName: "Ghost", reason: "No board found." })
+    )
+
+    await login(page)
+    await page.goto("/dashboard/jobs")
+    await page.getByLabel("Company name").fill("Ghost")
+    await page.getByRole("button", { name: "Find jobs" }).click()
+    await page.getByLabel("Job board link").fill("https://ghost.com/careers")
+    await page.getByRole("button", { name: "Use this link" }).click()
+
+    await expect(page.getByText(/isn't a Greenhouse, Lever or Workable job board/)).toBeVisible()
+    await expect(page.getByLabel("Job board link")).toHaveValue("https://ghost.com/careers")
   })
 })

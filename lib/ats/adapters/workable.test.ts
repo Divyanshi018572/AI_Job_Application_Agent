@@ -126,3 +126,24 @@ describe("workableAdapter.submitApplication", () => {
     expect(result.message).toMatch(/not implemented/i)
   })
 })
+
+describe("workableAdapter.fetchBoardName", () => {
+  it("returns the name the board displays", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ name: "Acme Corp", jobs: [] }) })
+    vi.stubGlobal("fetch", fetchMock)
+
+    expect(await workableAdapter.fetchBoardName("acme")).toBe("Acme Corp")
+    expect(fetchMock).toHaveBeenCalledWith("https://apply.workable.com/api/v1/widget/accounts/acme")
+  })
+
+  it("returns null for an unknown board, a missing name, or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) }))
+    expect(await workableAdapter.fetchBoardName("nope")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ name: "  " }) }))
+    expect(await workableAdapter.fetchBoardName("acme")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))
+    expect(await workableAdapter.fetchBoardName("acme")).toBeNull()
+  })
+})

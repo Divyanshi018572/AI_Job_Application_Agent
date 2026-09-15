@@ -83,7 +83,7 @@ Phase 0 of the project plan (`AUDIT_AND_ROADMAP.md` Section 5) has this as an op
 - Every PR runs `lint` + `typecheck` + `build` at minimum before merge is allowed; add `npm audit` (or Dependabot) once CI exists.
 - Branch protection on `main`: required PR, required status checks, no force-push, squash-merge only.
 - Never use `--no-verify` to skip hooks or `-c commit.gpgsign=false` to bypass signing unless a human explicitly asks for that specific exception.
-- Staging auto-deploys on merge to `main`; production deploy is a separate, manually-triggered, approval-gated workflow — never automatic.
+- Staging auto-deploys after CI passes on `dev`. Production deploys only from `main`, and only after a required reviewer approves in the `production` GitHub environment. It never ships without a human (see `docs/DEPLOYMENT.md`).
 - Use **test-mode** keys (Stripe, etc.) in CI/staging secrets; live keys exist only in the production environment's secret store.
 
 ## 8. Multi-Tenant Verification Checklist (run before every production promotion)
