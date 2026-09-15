@@ -33,8 +33,27 @@ const REMOTE_URL = process.env.E2E_BASE_URL?.replace(/\/$/, "")
 const BASE_URL = REMOTE_URL ?? `http://localhost:${PORT}`
 const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
 
+// Which server the tests run against:
+// - E2E_BASE_URL set: that deployment (the deploy workflows' smoke tests).
+// - CI: the production build the workflow just made.
+// - Locally, by default: build, then serve the production build — the same
+//   thing CI tests. `next dev` compiles each route on its first request; on
+//   a cold dev server that took ~50s for /api/auth/login alone and the
+//   logged-in tests timed out, while a production build passes them in
+//   seconds. The dev server is opt-in with E2E_DEV=1 (`npm run
+//   test:e2e:dev`), best used with `npm run dev -- -p 3100` already warm.
+const mode = REMOTE_URL ? "remote" : process.env.CI ? "ci" : process.env.E2E_DEV ? "dev" : "local"
+
+const SERVER_COMMANDS = {
+  ci: `npx next start -p ${PORT}`,
+  local: `npx next build && npx next start -p ${PORT}`,
+  dev: `npx next dev -p ${PORT}`,
+} as const
+
 export default defineConfig({
   testDir: "./e2e",
+  timeout: mode === "dev" ? 120_000 : 30_000,
+  expect: { timeout: mode === "dev" ? 20_000 : 5_000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -50,14 +69,16 @@ export default defineConfig({
       : undefined,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: REMOTE_URL
-    ? undefined
-    : {
-        // CI builds first (see .github/workflows/e2e.yml) and serves the
-        // production build; locally a dev server is faster to start.
-        command: process.env.CI ? `npx next start -p ${PORT}` : `npx next dev -p ${PORT}`,
-        url: BASE_URL,
-        reuseExistingServer: !process.env.CI,
-        timeout: 180_000,
-      },
+  webServer:
+    mode === "remote"
+      ? undefined
+      : {
+          command: SERVER_COMMANDS[mode],
+          url: BASE_URL,
+          // Locally, reuse a server already on the port (e.g. a warm dev
+          // server with E2E_DEV=1). CI always starts its own.
+          reuseExistingServer: mode !== "ci",
+          // Local mode includes a full `next build`.
+          timeout: mode === "local" ? 300_000 : 180_000,
+        },
 })
