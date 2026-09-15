@@ -1,4 +1,4 @@
-import type { SearchProvider, SearchResult } from "@/lib/search/types"
+import type { SearchOptions, SearchProvider, SearchResult } from "@/lib/search/types"
 
 /**
  * Tavily Search API — used in place of the plan's original Brave Search
@@ -18,7 +18,7 @@ interface TavilyApiResponse {
 }
 
 export const tavilyProvider: SearchProvider = {
-  async search(query: string): Promise<SearchResult[]> {
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResult[]> {
     const apiKey = process.env.TAVILY_API_KEY
     if (!apiKey) {
       throw new Error("Missing TAVILY_API_KEY in environment variables (.env.local)")
@@ -31,7 +31,8 @@ export const tavilyProvider: SearchProvider = {
         api_key: apiKey,
         query,
         search_depth: "basic",
-        max_results: 5,
+        max_results: options.maxResults ?? 5,
+        ...(options.includeDomains?.length ? { include_domains: options.includeDomains } : {}),
       }),
     })
 

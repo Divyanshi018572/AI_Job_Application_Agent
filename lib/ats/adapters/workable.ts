@@ -52,6 +52,8 @@ function mapWorkableJob(job: WorkableJob, companyDisplayName: string): RawJob {
 }
 
 export const workableAdapter: ATSAdapter = {
+  searchDomain: "workable.com",
+
   detectPlatform(url: string): boolean {
     try {
       const host = new URL(url).hostname
@@ -81,6 +83,17 @@ export const workableAdapter: ATSAdapter = {
 
     const companyDisplayName = data.name ?? token
     return data.jobs.map((job) => mapWorkableJob(job, companyDisplayName))
+  },
+
+  async fetchBoardName(token: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${WORKABLE_API_BASE}/${encodeURIComponent(token)}`)
+      if (!res.ok) return null
+      const data = (await res.json()) as { name?: unknown }
+      return typeof data.name === "string" && data.name.trim() ? data.name.trim() : null
+    } catch {
+      return null
+    }
   },
 
   async submitApplication(_job: Job, _profile: Profile): Promise<SubmissionResult> {

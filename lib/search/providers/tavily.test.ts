@@ -90,4 +90,25 @@ describe("tavilyProvider.search", () => {
     expect(body.api_key).toBe("test-key")
     expect(body.query).toBe("acme careers greenhouse OR lever OR workable")
   })
+
+  it("passes a domain filter and result count through to Tavily", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ results: [] }) })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await tavilyProvider.search("acme jobs", { includeDomains: ["greenhouse.io", "lever.co"], maxResults: 10 })
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).toMatchObject({ query: "acme jobs", include_domains: ["greenhouse.io", "lever.co"], max_results: 10 })
+  })
+
+  it("sends no domain filter when none is given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({ results: [] }) })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await tavilyProvider.search("acme careers")
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body).not.toHaveProperty("include_domains")
+    expect(body.max_results).toBe(5)
+  })
 })

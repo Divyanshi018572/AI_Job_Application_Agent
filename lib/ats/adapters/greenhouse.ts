@@ -39,6 +39,8 @@ function mapGreenhouseJob(job: GreenhouseJob, companyToken: string): RawJob {
 }
 
 export const greenhouseAdapter: ATSAdapter = {
+  searchDomain: "greenhouse.io",
+
   detectPlatform(url: string): boolean {
     try {
       const host = new URL(url).hostname
@@ -69,6 +71,17 @@ export const greenhouseAdapter: ATSAdapter = {
     if (!Array.isArray(data.jobs)) return []
 
     return data.jobs.map((job) => mapGreenhouseJob(job, token))
+  },
+
+  async fetchBoardName(token: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${GREENHOUSE_API_BASE}/${encodeURIComponent(token)}`)
+      if (!res.ok) return null
+      const data = (await res.json()) as { name?: unknown }
+      return typeof data.name === "string" && data.name.trim() ? data.name.trim() : null
+    } catch {
+      return null
+    }
   },
 
   async submitApplication(_job: Job, _profile: Profile): Promise<SubmissionResult> {

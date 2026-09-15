@@ -98,3 +98,31 @@ describe("leverAdapter.submitApplication", () => {
     expect(result.message).toMatch(/not implemented/i)
   })
 })
+
+describe("leverAdapter.fetchBoardName", () => {
+  const page = (html: string, status = 200) => ({ ok: status < 400, status, text: () => Promise.resolve(html) })
+
+  it("reads the company name from the hosted board page's title", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(page("<html><head><title>Palantir Technologies</title></head></html>"))
+    vi.stubGlobal("fetch", fetchMock)
+
+    expect(await leverAdapter.fetchBoardName("palantir")).toBe("Palantir Technologies")
+    expect(fetchMock).toHaveBeenCalledWith("https://jobs.lever.co/palantir")
+  })
+
+  it("decodes HTML entities in the title", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(page("<title>Ben &amp; Jerry&#39;s</title>")))
+    expect(await leverAdapter.fetchBoardName("benjerry")).toBe("Ben & Jerry's")
+  })
+
+  it("returns null for an unknown board, a page with no title, or a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(page("not found", 404)))
+    expect(await leverAdapter.fetchBoardName("nope")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(page("<html></html>")))
+    expect(await leverAdapter.fetchBoardName("acme")).toBeNull()
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")))
+    expect(await leverAdapter.fetchBoardName("acme")).toBeNull()
+  })
+})

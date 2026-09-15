@@ -13,6 +13,12 @@ export interface SearchResult {
   snippet?: string
 }
 
+export interface SearchOptions {
+  /** Only return results on these domains (and their subdomains). */
+  includeDomains?: string[]
+  maxResults?: number
+}
+
 export interface SearchProvider {
-  search(query: string): Promise<SearchResult[]>
+  search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 }
