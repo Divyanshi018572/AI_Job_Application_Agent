@@ -52,6 +52,7 @@ const job = (id: string, overrides: Record<string, unknown> = {}) => ({
   job_url: `https://boards.greenhouse.io/acme/jobs/${id}`,
   fetched_at: "2026-09-15T00:00:00Z",
   classified_at: "2026-09-15T00:00:00Z",
+  company_type: null,
   ...overrides,
 })
 
@@ -83,6 +84,22 @@ test.describe("jobs page", () => {
     await page.goto("/dashboard/jobs")
 
     await expect(page.getByText("No jobs tracked yet")).toBeVisible()
+  })
+
+  test("shows a company's size/tier tag only when it's classified (Task 2.5)", async ({ page }) => {
+    await page.route("**/api/jobs", (route) =>
+      json(route, {
+        jobs: [
+          job("1", { company: "Stripe", company_type: "enterprise" }),
+          job("2", { company: "Unlisted Co", company_type: null }),
+        ],
+      })
+    )
+    await login(page)
+    await page.goto("/dashboard/jobs")
+
+    await expect(page.getByText("Enterprise", { exact: true })).toHaveCount(1)
+    await expect(page.getByText("Unlisted Co")).toBeVisible()
   })
 
   test("fetch → partial tagging → Tag more → fully tagged", async ({ page }) => {
