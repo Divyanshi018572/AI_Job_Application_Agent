@@ -178,7 +178,7 @@ Once Phase 0.5 is closed:
 | 1 | 1.3 Onboarding & Resume Parsing | ☑ Done — confidence scoring, signed URLs, avatar `parsed_data` bug fixed |
 | 1 | 1.4 Security Baseline | ☑ Done — RLS solid, storage bug fixed, two-account test passed |
 | 2 | 2.1 ATS API Integration | ☑ Done & merged — Greenhouse, Lever, and Workable adapters all implemented and tested |
-| 2 | 2.2 Company Token Discovery | ◐ Logic done & merged (Tavily instead of Brave Search, documented swap); the curated list is now the 124 verified boards from 2.5. Not yet reachable from the UI |
+| 2 | 2.2 Company Token Discovery | ☑ Done (Session 17, pending PR): type a company name → curated list → cached result → domain-restricted web search (Tavily instead of Brave, documented swap), with a board accepted only if its displayed name matches and it has open jobs; paste-a-link fallback; every search and link queued for review in `company_discoveries`; 10 searches per user per hour |
 | 2 | 2.3 Caching & Rate Limits | ◐ ~90% — 6-hour cache, exponential backoff on 429/5xx, bounded classification concurrency, batched tagging (Session 13, pending PR + `classified_at` migration). Missing: cross-user per-platform concurrency cap (needs a job queue, e.g. Inngest) |
 | 2 | 2.4 Job Classification Pipeline | ☑ Done — NVIDIA NIM instead of Anthropic Claude (documented swap). Model retired 2026-08-26 and replaced in Session 13 with a verified primary + fallback, configurable via `NVIDIA_CLASSIFICATION_MODEL` |
 | 2 | 2.5 Company Metadata Table | ☑ Done (Session 15): 200 seeded companies, 124 with live-verified boards, 26 deliberately unclassified (no tag shown). Added `ats_platform`/`board_token` columns (documented deviation). Jobs get real company names and tier tags |
