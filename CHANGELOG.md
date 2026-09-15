@@ -16,13 +16,15 @@ Running record of every change made to this repo across agent sessions, kept in 
 | 6 | Decide when to merge `dev` into `main` again | Release decision | **Your call** — `main` is missing everything since Session 9 |
 | 7 | Change the GitHub default branch from `main` to `dev` | Needs repo-admin access | ✅ **Done** (confirmed via GitHub API on 2026-09-15) |
 | 8 | Apply `jobs` + repair migrations (`20260914010000`, `20260914020000`) | Manual migrations | ✅ **Done** (user-confirmed `board_token` present) |
-| 9 | Apply `supabase/migrations/20260915000000_jobs_classified_at.sql` **before** merging PR for Session 13 | Manual migrations; the new code reads `classified_at` and the jobs page will error without it | **Open** |
-| 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | **Open** |
-| 11 | Merge the Session 14 PR (`phase0/0.3-e2e-and-0.4-deploy-pipelines` → `dev`) **after** #10 | Stacked on the Session 13 branch; needs GitHub UI | **Open** |
+| 9 | Apply `supabase/migrations/20260915000000_jobs_classified_at.sql` **before** merging PR for Session 13 | Manual migrations; the new code reads `classified_at` and the jobs page will error without it | ✅ **Done** (verified 2026-09-15: `classified_at` is queryable on the live project) |
+| 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | ✅ **Done** (PR #11) |
+| 11 | Merge the Session 14 PR (`phase0/0.3-e2e-and-0.4-deploy-pipelines` → `dev`) **after** #10 | Stacked on the Session 13 branch; needs GitHub UI | ✅ **Done** (PR #12; CI on `dev` green incl. `e2e`; Deploy staging correctly *skipped*) |
 | 12 | Create an E2E test user + 4 `E2E_*` GitHub secrets (`docs/DEPLOYMENT.md` step 1) | Needs your Supabase dashboard + repo admin | **Open**; until then the 6 logged-in specs skip |
 | 13 | Vercel project, env vars, token; GitHub vars/secrets; `staging` + `production` environments with you as required reviewer (`docs/DEPLOYMENT.md` steps 2–4) | Account creation and secrets can't be done from agent sessions | **Open**; deploy workflows stay *skipped* until then |
 | 14 | (Optional) One-time `supabase migration repair` + `SUPABASE_DB_URL`/`SUPABASE_DB_PUSH` to automate migrations (`docs/DEPLOYMENT.md` step 5) | Needs your database password | **Optional**; supersedes row 5 |
 | 15 | Branch protection on `dev` and `main` with required checks `lint`, `typecheck`, `unit-test`, `build`, `e2e` (`docs/DEPLOYMENT.md` step 6) | Repo admin | **Open** (plan Task 0.1) |
+| 16 | Apply `supabase/migrations/20260916000000_companies_board_tokens_and_seed.sql` in the SQL Editor | Manual migrations | **Open**. Either order vs. merging is safe: without it, jobs just get no tags or real names |
+| 17 | Merge the Session 15 PR (`phase2/2.5-company-metadata-table` → `dev`) | Needs GitHub UI | **Open** |
 
 ---
 
@@ -262,13 +264,64 @@ Branch `phase0/0.3-e2e-and-0.4-deploy-pipelines`, stacked on the Session 13 bran
 
 ---
 
+## Session 15 — Task 2.5: Company Metadata Table
+
+PRs #11 and #12 were merged, and CI on `dev` (fa52e46) passed all 5 jobs, including the new `e2e`. Deploy staging showed *skipped*, as designed until Vercel is set up. `classified_at` was confirmed live.
+
+Branch `phase2/2.5-company-metadata-table`, with the plan's two commits: `0460e9c` feat and `aaeb609` test.
+
+**Seed data, verified live rather than guessed.** A wrong board token silently returns someone else's jobs, which is why the curated list had been left empty. Method:
+- Probed 280 candidate companies against the public Greenhouse, Lever and Workable APIs (slug variants plus hints).
+- Kept a board only if the board's own company name matched **and** it had at least one open job.
+- Rejected by hand:
+  - **Every Workable hit.** Workable answers 200 with an echoed name for any registered account. "apple", "meta", "tesla" and others all had 0 jobs.
+  - **Name matches that were other organizations.** Lever `neon` is a Brazilian bank and Lever `linkedin` is a partner sandbox. Greenhouse `remote` is General Assembly, `binance` is a template board ("ADD JOB NAME HERE"), and `warp` is ambiguous.
+- Spot-checked job titles on 40 ambiguous boards.
+
+**Result: 200 companies.**
+- 124 have a verified board: 112 Greenhouse and 12 Lever.
+- Tags: 6 FAANG-tier, 51 Enterprise, 98 Mid-size, 19 Startup.
+- 26 are deliberately **unclassified**: within about 15% of a size-band edge, or growing fast enough to cross one soon (e.g. Anthropic, Cloudflare, Palantir, Pinterest). Per the plan, they get no tag rather than a guess.
+- Size bands are documented in `lib/companies/types.ts`.
+
+**What changed:**
+- Migration `20260916000000`:
+  - Adds `ats_platform` and `board_token` to `companies`. This is a documented deviation from the plan's column list, with the same reason as `jobs.board_token`.
+  - Constraints: both board fields or neither, lowercase tokens, a known platform, and one company per board.
+  - Seeds the 200 rows. It is idempotent, and re-runs never overwrite `enriched` rows.
+- `lib/companies/seed-data.ts` is the source of truth. The curated list that discovery (2.2) checks first is now derived from it.
+- Ingestion looks each board up: jobs get the real company name (Greenhouse and Lever only return the token) and a `company_id`. A lookup error never blocks saving.
+- `/api/jobs` embeds the company type. The Jobs page shows FAANG-tier, Enterprise, Mid-size or Startup next to the company name, and nothing when the company is unclassified.
+
+**Verified:**
+- **Unit tests:** Vitest 167/167, 18 new.
+  - Seed integrity, and a row-for-row match with the migration. A mutation check confirmed it: changing one token fails the test.
+  - "No tag when unclassified".
+  - Discovery resolves "stripe" without calling search.
+  - 5 ingestion cases.
+- **Postgres 16 + pgvector:**
+  - The migration applies after the jobs chain and runs twice cleanly: 200 rows, 124 boards.
+  - All 6 constraint violations are rejected.
+  - An `enriched` row survives a re-run.
+- **Real PostgREST:**
+  - The embed returns `{"company_type":"enterprise"}` for a curated job and `null` otherwise.
+  - The board lookup finds Airbnb.
+  - A logged-out read is denied (401), and a write attempt by a logged-in user is denied (403).
+- **Commit checks:** commit 1 alone passes typecheck and 149/149 (checked in a worktree). The build succeeds.
+- **Playwright:** 12 passed, 7 skipped (the new badge spec needs the test account).
+
+**Known limits:**
+- Headcounts come from public figures and will drift. Re-verify boards periodically, since companies switch ATS.
+- Companies without a board (Google, Netflix, …) can't link to jobs until an adapter for their ATS exists.
+- Not done here: wiring 2.2 discovery ("type a company name") into the UI. That is the next step.
+
+---
+
 ## Current Repo State (as of this entry)
 
-- `dev`: everything through Session 12. CI green.
-- Open branches, merge in this order:
-  1. `phase2/2.3-retry-and-nim-model-fix` (Session 13): **apply `20260915000000_jobs_classified_at.sql` first, then merge**.
-  2. `phase0/0.3-e2e-and-0.4-deploy-pipelines` (Session 14): stacked on 1.
+- `dev`: everything through Session 14. CI green (including `e2e`).
+- Open branch: `phase2/2.5-company-metadata-table` (Session 15). Apply `20260916000000_companies_board_tokens_and_seed.sql`, then merge; either order is safe.
 - `main`: missing everything since Session 9 — your call when to release.
 - Phase 0 (Bootstrap): CI (0.2) done; E2E (0.3), CD (0.4) and the environments/config check (0.5) are built and verified locally, and go live once the manual setup in `docs/DEPLOYMENT.md` is done. Branch protection (0.1) is still a manual step.
 - Phase 1 (Foundation & Security): **✅ complete**, tagged `v1.0-phase1-complete`.
-- Phase 2 (Core Discovery): Tasks 2.1 and 2.4 done; 2.3 done once this PR merges (the one gap vs. the plan: no cross-user per-platform concurrency limit, which needs a job queue such as Inngest); 2.2's discovery logic exists but isn't wired into the UI; 2.5 has its schema but no seed data. The 12 board tokens probed live this session are a verified starting point for 2.5's curated list.
+- Phase 2 (Core Discovery): 2.1, 2.4 and 2.5 done. 2.3 is done except the cross-user per-platform concurrency cap, which needs a job queue such as Inngest. 2.2's discovery logic is done and now uses the 124 verified boards; typing a company name in the UI is the next step.

@@ -1,4 +1,5 @@
 import type { ATSPlatform } from "@/lib/ats/registry"
+import { SEED_COMPANIES } from "@/lib/companies/seed-data"
 
 export interface CuratedCompany {
   /** Canonical display name, matched case-insensitively against user input. */
@@ -9,15 +10,11 @@ export interface CuratedCompany {
 
 /**
  * Curated company → board-token list (plan Task 2.2: "check curated token
- * list first" before falling back to search). Task 2.5 (Company Metadata
- * Table) is where this gets seeded with ~150-200 verified real companies
- * and moved to a real database table — deliberately left empty here rather
- * than filled with unverified guesses at real companies' board tokens,
- * which would be worse than no data (a wrong token silently returns
- * someone else's jobs or a 404, not a helpful fallback).
- *
- * discoverCompanyToken() takes this as an injectable parameter specifically
- * so Task 2.5's real (likely DB-backed) list can be passed in later without
- * changing discovery logic at all.
+ * list first" before falling back to search). Derived from Task 2.5's seed
+ * data: only companies whose board was verified live — right company name
+ * on the board and at least one open job — so a wrong token never silently
+ * returns someone else's jobs.
  */
-export const CURATED_COMPANIES: CuratedCompany[] = []
+export const CURATED_COMPANIES: CuratedCompany[] = SEED_COMPANIES.flatMap((c) =>
+  c.board ? [{ name: c.name, platform: c.board.platform, token: c.board.token }] : []
+)

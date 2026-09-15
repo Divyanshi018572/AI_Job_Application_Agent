@@ -47,6 +47,9 @@ function fakeSupabase(options: {
   seed?: Partial<Row>[]
   /** Reuse another fake's table — simulates a second request against the same data. */
   table?: Row[]
+  /** What the `companies` board lookup finds (Task 2.5). */
+  company?: { id: string; name: string } | null
+  companyLookupError?: { message: string }
 } = {}) {
   let nextId = 1
   const table: Row[] =
@@ -120,11 +123,35 @@ function fakeSupabase(options: {
     return q
   }
 
-  const client = { from: vi.fn(() => query()) }
+  const companyLookups: Record<string, unknown>[] = []
+  function companiesQuery() {
+    const eqs: Record<string, unknown> = {}
+    const q = {
+      select: () => q,
+      eq: (col: string, val: unknown) => {
+        eqs[col] = val
+        return q
+      },
+      maybeSingle: () => {
+        companyLookups.push(eqs)
+        return Promise.resolve(
+          options.companyLookupError
+            ? { data: null, error: options.companyLookupError }
+            : { data: options.company ?? null, error: null }
+        )
+      },
+    }
+    return q
+  }
+
+  const client = {
+    from: vi.fn((name: string) => (name === "companies" ? companiesQuery() : query())),
+  }
   return {
     supabase: client as unknown as SupabaseServerClient,
     table,
     upsertCalls,
+    companyLookups,
   }
 }
 
@@ -248,6 +275,56 @@ describe("ingestJobsForCompany — fetching and saving", () => {
     await ingestJobsForCompany(supabase, { ...board, companyDisplayName: "Acme Inc." })
 
     expect(table[0].company).toBe("Acme Inc.")
+  })
+
+  it("gives jobs from a curated board the company's real name and company_id (Task 2.5)", async () => {
+    const { supabase, table, companyLookups } = fakeSupabase({ company: { id: "co-1", name: "Acme Corp" } })
+    fetchJobsMock.mockResolvedValue([rawJob(1)])
+    classifyJobMock.mockResolvedValue(untaggable)
+
+    await ingestJobsForCompany(supabase, { ...board, boardToken: "Acme" })
+
+    expect(companyLookups).toEqual([{ ats_platform: "greenhouse", board_token: "acme" }])
+    expect(table[0]).toMatchObject({ company: "Acme Corp", company_id: "co-1" })
+  })
+
+  it("keeps a name the user typed over the curated name, but still links the company", async () => {
+    const { supabase, table } = fakeSupabase({ company: { id: "co-1", name: "Acme Corp" } })
+    fetchJobsMock.mockResolvedValue([rawJob(1)])
+    classifyJobMock.mockResolvedValue(untaggable)
+
+    await ingestJobsForCompany(supabase, { ...board, companyDisplayName: "Acme (EU)" })
+
+    expect(table[0]).toMatchObject({ company: "Acme (EU)", company_id: "co-1" })
+  })
+
+  it("saves jobs from a non-curated board with no company link", async () => {
+    const { supabase, table } = fakeSupabase({ company: null })
+    fetchJobsMock.mockResolvedValue([rawJob(1)])
+    classifyJobMock.mockResolvedValue(untaggable)
+
+    await ingestJobsForCompany(supabase, board)
+
+    expect(table[0]).toMatchObject({ company: "acme", company_id: null })
+  })
+
+  it("still saves the jobs when the company lookup errors", async () => {
+    const { supabase, table } = fakeSupabase({ companyLookupError: { message: "boom" } })
+    fetchJobsMock.mockResolvedValue([rawJob(1)])
+    classifyJobMock.mockResolvedValue(untaggable)
+
+    const result = await ingestJobsForCompany(supabase, board)
+
+    expect(result.jobsUpserted).toBe(1)
+    expect(table[0]).toMatchObject({ company: "acme", company_id: null })
+  })
+
+  it("skips the company lookup on a cache hit (nothing is saved)", async () => {
+    const { supabase, companyLookups } = fakeSupabase({ recentFetchedAt: new Date().toISOString() })
+
+    await ingestJobsForCompany(supabase, board)
+
+    expect(companyLookups).toEqual([])
   })
 
   it("handles a board with no open jobs", async () => {

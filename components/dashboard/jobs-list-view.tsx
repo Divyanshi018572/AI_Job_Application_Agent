@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { companyTypeLabel } from "@/lib/companies/types"
 
 interface JobRow {
   id: string
@@ -34,6 +35,8 @@ interface JobRow {
   job_url: string
   fetched_at: string
   classified_at: string | null
+  /** From the curated companies table; null when not classified. */
+  company_type: string | null
 }
 
 interface BoardRef {
@@ -296,7 +299,14 @@ export function JobsListView() {
                   </div>
                   <div>
                     <p className="font-semibold text-slate-900">{job.title}</p>
-                    <p className="text-sm text-slate-600">{job.company}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm text-slate-600">{job.company}</p>
+                      {companyTypeLabel(job.company_type) && (
+                        <Badge className="bg-indigo-500/10 text-indigo-600 hover:bg-indigo-500/10">
+                          {companyTypeLabel(job.company_type)}
+                        </Badge>
+                      )}
+                    </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <Badge variant="secondary" className="capitalize">
                         {job.platform}
