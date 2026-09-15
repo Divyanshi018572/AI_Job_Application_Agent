@@ -33,6 +33,24 @@ interface JobRow {
   work_mode: string | null
   job_url: string
   fetched_at: string
+  classified_at: string | null
+}
+
+interface BoardRef {
+  platform: string
+  boardToken: string
+  companyDisplayName?: string
+}
+
+interface IngestResponse {
+  status: "cached" | "fetched"
+  jobsFetched: number
+  jobsUpserted: number
+  jobsClassified: number
+  pendingClassification: number
+  classificationFailures: number
+  classificationError?: string
+  error?: string
 }
 
 const PLATFORMS = [
@@ -49,7 +67,12 @@ export function JobsListView() {
   const [companyDisplayName, setCompanyDisplayName] = React.useState("")
   const [ingesting, setIngesting] = React.useState(false)
   const [statusMessage, setStatusMessage] = React.useState("")
+  const [warningMessage, setWarningMessage] = React.useState("")
   const [errorMessage, setErrorMessage] = React.useState("")
+  /** Board last fetched this session, and how many of its jobs still need
+   * tags — drives the "Tag more" button. */
+  const [lastBoard, setLastBoard] = React.useState<BoardRef | null>(null)
+  const [pendingCount, setPendingCount] = React.useState(0)
 
   const fetchJobs = React.useCallback(async () => {
     setLoading(true)
@@ -69,48 +92,76 @@ export function JobsListView() {
     fetchJobs()
   }, [fetchJobs])
 
-  async function handleAddCompany(e: React.FormEvent) {
-    e.preventDefault()
-    if (!boardToken.trim()) return
-
+  /** Fetches the board (unless fetched in the last 6 hours) and tags the
+   * next batch of its untagged jobs. Calling it again for the same board is
+   * how "Tag more" works. */
+  async function runIngest(board: BoardRef, isTagMore: boolean): Promise<boolean> {
     setIngesting(true)
     setErrorMessage("")
-    setStatusMessage("Fetching jobs and classifying with NVIDIA NIM...")
+    setWarningMessage("")
+    setStatusMessage(
+      isTagMore
+        ? "Tagging the next batch of jobs..."
+        : "Fetching jobs and tagging the first batch — this can take up to a minute..."
+    )
 
     try {
       const res = await fetch("/api/jobs/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform,
-          boardToken: boardToken.trim(),
-          companyDisplayName: companyDisplayName.trim() || undefined,
-        }),
+        body: JSON.stringify(board),
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as IngestResponse
       if (!res.ok) {
         throw new Error(data.error || "Failed to fetch jobs for that company")
       }
 
-      if (data.status === "cached") {
-        setStatusMessage(
-          "Already fetched this company recently — showing cached results."
-        )
-      } else {
-        setStatusMessage(
-          `Found ${data.jobsFetched} job${data.jobsFetched === 1 ? "" : "s"}.`
-        )
-      }
-      setTimeout(() => setStatusMessage(""), 4000)
+      const saved =
+        data.status === "fetched"
+          ? `Saved ${data.jobsUpserted} job${data.jobsUpserted === 1 ? "" : "s"}. `
+          : ""
+      const tagged = `Tagged ${data.jobsClassified}${
+        data.pendingClassification > 0 ? `, ${data.pendingClassification} still untagged` : ""
+      }.`
+      setStatusMessage(saved + tagged)
+      setTimeout(() => setStatusMessage(""), 6000)
 
-      setBoardToken("")
-      setCompanyDisplayName("")
+      // Not auto-dismissed: repeated classification failures usually mean a
+      // config problem (bad key, retired model) the user needs to act on.
+      setWarningMessage(
+        data.classificationFailures > 0
+          ? `${data.classificationFailures} job${data.classificationFailures === 1 ? "" : "s"} couldn't be tagged this time and will be retried on "Tag more". Reason: ${data.classificationError ?? "unknown error"}`
+          : ""
+      )
+
+      setLastBoard(board)
+      setPendingCount(data.pendingClassification)
       await fetchJobs()
+      return true
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to fetch jobs")
+      return false
     } finally {
       setIngesting(false)
+    }
+  }
+
+  async function handleAddCompany(e: React.FormEvent) {
+    e.preventDefault()
+    if (!boardToken.trim()) return
+
+    const ok = await runIngest(
+      {
+        platform,
+        boardToken: boardToken.trim(),
+        companyDisplayName: companyDisplayName.trim() || undefined,
+      },
+      false
+    )
+    if (ok) {
+      setBoardToken("")
+      setCompanyDisplayName("")
     }
   }
 
@@ -179,8 +230,34 @@ export function JobsListView() {
               {statusMessage}
             </p>
           )}
+          {warningMessage && (
+            <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+              {warningMessage}
+            </p>
+          )}
           {errorMessage && (
             <p className="mt-3 text-sm font-medium text-red-600">{errorMessage}</p>
+          )}
+          {lastBoard && pendingCount > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+              <p className="text-sm text-indigo-900">
+                {pendingCount} job{pendingCount === 1 ? "" : "s"} from{" "}
+                <span className="font-semibold">
+                  {lastBoard.companyDisplayName || lastBoard.boardToken}
+                </span>{" "}
+                still need experience / type / work-mode tags.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={ingesting}
+                onClick={() => runIngest(lastBoard, true)}
+              >
+                {ingesting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                Tag more
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -240,6 +317,11 @@ export function JobsListView() {
                         <Badge variant="outline" className="gap-1">
                           <Sparkles className="size-3" />
                           {job.experience_level}
+                        </Badge>
+                      )}
+                      {!job.classified_at && (
+                        <Badge variant="outline" className="border-dashed text-slate-400">
+                          Not tagged yet
                         </Badge>
                       )}
                     </div>

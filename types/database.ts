@@ -65,6 +65,7 @@ export type Database = {
           match_score: number | null
           embedding: unknown | null
           job_url: string
+          classified_at: string | null
           source_url: string | null
           applied_status: string
           saved_status: boolean
@@ -93,6 +94,7 @@ export type Database = {
           match_score?: number | null
           embedding?: unknown | null
           job_url: string
+          classified_at?: string | null
           source_url?: string | null
           applied_status?: string
           saved_status?: boolean
@@ -121,6 +123,7 @@ export type Database = {
           match_score?: number | null
           embedding?: unknown | null
           job_url?: string
+          classified_at?: string | null
           source_url?: string | null
           applied_status?: string
           saved_status?: boolean
