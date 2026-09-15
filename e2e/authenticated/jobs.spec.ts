@@ -18,6 +18,12 @@ test.skip(
   "Needs E2E_USER_EMAIL, E2E_USER_PASSWORD and a real NEXT_PUBLIC_SUPABASE_URL — see docs/DEPLOYMENT.md"
 )
 
+// A trace records every action's arguments (the typed password) and every
+// request header (the session cookie). CI failure artifacts are downloadable
+// on a public repo, so no traces or videos of logged-in tests there;
+// screenshots are enough. Local runs keep them — test-results/ is gitignored.
+if (process.env.CI) test.use({ trace: "off", video: "off" })
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -67,9 +73,15 @@ test.describe("real auth", () => {
   test("the real /api/jobs answers 200 for a logged-in user (auth + RLS + schema wired)", async ({ page }) => {
     await skipOnboarding(page)
     await login(page)
-    const res = await page.request.get("/api/jobs")
-    expect(res.status()).toBe(200)
-    expect(Array.isArray((await res.json()).jobs)).toBe(true)
+    // Called from inside the page, not page.request: on failure Playwright
+    // prints page.request's headers — including the session cookie — to
+    // the log, which is public in CI.
+    const res = await page.evaluate(async () => {
+      const r = await fetch("/api/jobs")
+      return { status: r.status, body: await r.json() }
+    })
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.jobs)).toBe(true)
   })
 })
 

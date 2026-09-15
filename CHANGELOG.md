@@ -19,12 +19,13 @@ Running record of every change made to this repo across agent sessions, kept in 
 | 9 | Apply `supabase/migrations/20260915000000_jobs_classified_at.sql` **before** merging PR for Session 13 | Manual migrations; the new code reads `classified_at` and the jobs page will error without it | ✅ **Done** (verified 2026-09-15: `classified_at` is queryable on the live project) |
 | 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | ✅ **Done** (PR #11) |
 | 11 | Merge the Session 14 PR (`phase0/0.3-e2e-and-0.4-deploy-pipelines` → `dev`) **after** #10 | Stacked on the Session 13 branch; needs GitHub UI | ✅ **Done** (PR #12; CI on `dev` green incl. `e2e`; Deploy staging correctly *skipped*) |
-| 12 | Create an E2E test user + 4 `E2E_*` GitHub secrets (`docs/DEPLOYMENT.md` step 1) | Needs your Supabase dashboard + repo admin | **Open**; until then the 6 logged-in specs skip |
+| 12 | Create an E2E test user + 4 `E2E_*` GitHub secrets (`docs/DEPLOYMENT.md` step 1) | Needs your Supabase dashboard + repo admin | ◐ **In progress**: test user created and working locally (19/19). Rotate it first (row 18), then add the 4 GitHub secrets |
 | 13 | Vercel project, env vars, token; GitHub vars/secrets; `staging` + `production` environments with you as required reviewer (`docs/DEPLOYMENT.md` steps 2–4) | Account creation and secrets can't be done from agent sessions | **Open**; deploy workflows stay *skipped* until then |
 | 14 | (Optional) One-time `supabase migration repair` + `SUPABASE_DB_URL`/`SUPABASE_DB_PUSH` to automate migrations (`docs/DEPLOYMENT.md` step 5) | Needs your database password | **Optional**; supersedes row 5 |
 | 15 | Branch protection on `dev` and `main` with required checks `lint`, `typecheck`, `unit-test`, `build`, `e2e` (`docs/DEPLOYMENT.md` step 6) | Repo admin | **Open** (plan Task 0.1) |
 | 16 | Apply `supabase/migrations/20260916000000_companies_board_tokens_and_seed.sql` in the SQL Editor | Manual migrations | **Open**. Either order vs. merging is safe: without it, jobs just get no tags or real names |
 | 17 | Merge the Session 15 PR (`phase2/2.5-company-metadata-table` → `dev`) | Needs GitHub UI | **Open** |
+| 18 | **Rotate the E2E test user**: delete it in Supabase → Authentication → Users, recreate it (Auto Confirm) with a new password, and update `.env.local` and the GitHub secrets | A pasted Playwright log contained that user's live session cookie (access + refresh token) | **Open**, do this before adding the GitHub secrets |
 
 ---
 
@@ -317,10 +318,37 @@ Branch `phase2/2.5-company-metadata-table`, with the plan's two commits: `0460e9
 
 ---
 
+## Session 16 — Logged-in E2E Failures Fixed (and an Auth Robustness Bug)
+
+The user created the E2E test account and ran `npm run test:e2e`. The 12 public tests passed, 3 of the mocked jobs-page tests passed, and **4 logged-in tests timed out**.
+
+**Diagnosis:** reproduced locally with the credentials in `.env.local`, never printing them. Traces were read for URLs and timings only.
+- Against a production build, all 7 logged-in tests passed, and against a *warm* dev server all 7 passed too. The failures happened only on a *cold* `next dev` started by Playwright. The tests themselves were fine.
+- The cold dev server compiled `/api/auth/login` in **~50s** with 4 workers waiting on it. Next's client-side navigation to `/dashboard` was then aborted mid-compile, and the fallback full page load never finished. This was still failing with a 120s timeout.
+- It also surfaced a real bug: `supabase.auth.getUser()` in `proxy.ts` **threw** `TypeError: fetch failed … other side closed` (a kept-alive socket Supabase had already closed). Nothing caught it, so the request died. Real users could hit this on any network blip.
+
+**Fixes** (on `phase2/2.5-company-metadata-table`, since they touch its spec file):
+- `5898b9e` fix(auth):
+  - `updateSession` retries the session check once.
+  - If the retry fails too, it still fails closed. API routes now return 503 "couldn't verify your session" instead of a misleading 401, and pages still redirect to login.
+  - First unit tests for the auth gate: 11.
+- `731e850` fix(0.3):
+  - `npm run test:e2e` now builds and serves a production build, as CI does. `test:e2e:dev` keeps the dev-server option.
+  - **Credential hygiene:** the real-API spec now calls `fetch()` inside the page, because `page.request` printed the session cookie in its failure log, which is how it reached the chat. CI records no traces or video for logged-in tests, since traces contain the typed password and public-repo artifacts are downloadable.
+
+**Verified:**
+- From a fully cold start (`.next` deleted), `npm run test:e2e` gave **19/19 passed in 58s** including the build, then 19/19 again in 40s.
+- CI mode: 19/19 in 15s.
+- Vitest 178/178. Typecheck and lint clean.
+
+**Human action:** rotate the test user (intervention row 18). The pasted log contained its live session.
+
+---
+
 ## Current Repo State (as of this entry)
 
 - `dev`: everything through Session 14. CI green (including `e2e`).
-- Open branch: `phase2/2.5-company-metadata-table` (Session 15). Apply `20260916000000_companies_board_tokens_and_seed.sql`, then merge; either order is safe.
+- Open branch: `phase2/2.5-company-metadata-table` (Sessions 15–16: company seed, auth-check retry, local E2E fix). Apply `20260916000000_companies_board_tokens_and_seed.sql`, then merge; either order is safe.
 - `main`: missing everything since Session 9 — your call when to release.
 - Phase 0 (Bootstrap): CI (0.2) done; E2E (0.3), CD (0.4) and the environments/config check (0.5) are built and verified locally, and go live once the manual setup in `docs/DEPLOYMENT.md` is done. Branch protection (0.1) is still a manual step.
 - Phase 1 (Foundation & Security): **✅ complete**, tagged `v1.0-phase1-complete`.

@@ -47,10 +47,29 @@ e2e/
 
 ```bash
 npx playwright install chromium   # once
-npm run test:e2e                  # starts `next dev` on port 3100 automatically
+npm run test:e2e                  # builds, serves the production build on port 3100, runs everything (~1 min)
 npm run test:e2e:ui               # same, in Playwright's interactive UI
 npm run test:e2e:smoke            # public specs only
+npm run test:e2e:dev              # against `next dev` instead — see below
 ```
+
+`test:e2e` tests a production build, like CI, on purpose. `next dev`
+compiles each route on its first request. On a cold dev server that took
+~50s for the login route alone, and the logged-in specs timed out. The
+same specs pass in seconds on a production build. For quick iteration
+against the dev server, start it and warm it first by clicking through
+the app, then run the dev variant:
+
+```bash
+npm run dev -- -p 3100            # terminal 1
+npm run test:e2e:dev              # terminal 2, reuses the running server
+```
+
+Never paste Playwright output from the logged-in specs into chats or
+issues without checking it first. A failed request can print the test
+user's session cookie. The specs avoid the one call that did this, and
+CI records no traces or video for them, but local `test-results/` still
+holds full traces. The folder is gitignored; keep it local.
 
 Point the suite at any running site instead of starting a server:
 

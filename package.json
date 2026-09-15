@@ -20,7 +20,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:smoke": "playwright test e2e/public",
-    "check:env": "node scripts/check-env.mjs"
+    "check:env": "node scripts/check-env.mjs",
+    "test:e2e:dev": "cross-env E2E_DEV=1 playwright test"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -20,7 +20,7 @@ function isPublicPath(pathname: string) {
 }
 
 export async function proxy(request: NextRequest) {
-  const { response, user } = await updateSession(request)
+  const { response, user, authUnavailable } = await updateSession(request)
   const { pathname } = request.nextUrl
 
   if (user && isAuthPath(pathname)) {
@@ -34,7 +34,14 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!user && !isPublicPath(pathname) && pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // Still refused either way; a 503 just stops a logged-in user being
+    // told they're unauthorized when Supabase was briefly unreachable.
+    return authUnavailable
+      ? NextResponse.json(
+          { error: "Couldn't verify your session. Please try again." },
+          { status: 503 }
+        )
+      : NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   return response
