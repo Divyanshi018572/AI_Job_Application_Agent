@@ -9,9 +9,14 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  // Only what the list renders. Descriptions average ~8.7 KB each on real
+  // Greenhouse boards, so `select("*")` would send megabytes for a large
+  // board that the list never displays.
   const { data, error: queryError } = await supabase
     .from("jobs")
-    .select("*")
+    .select(
+      "id, platform, title, company, location, experience_level, employment_type, work_mode, job_url, fetched_at, classified_at"
+    )
     .eq("user_id", user.id)
     .order("fetched_at", { ascending: false })
 

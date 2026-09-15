@@ -1,3 +1,4 @@
+import { HttpError } from "@/lib/http/retry"
 import type { ATSAdapter, Job, Profile, RawJob, SubmissionResult } from "@/lib/ats/types"
 
 /**
@@ -58,13 +59,13 @@ export const leverAdapter: ATSAdapter = {
     )
 
     if (res.status === 404) {
-      throw new Error(`Lever board not found for token "${token}"`)
+      throw new HttpError(`Lever board not found for token "${token}"`, res.status)
     }
     if (res.status === 429) {
-      throw new Error(`Lever rate limit hit while fetching board "${token}"`)
+      throw new HttpError(`Lever rate limit hit while fetching board "${token}"`, res.status)
     }
     if (!res.ok) {
-      throw new Error(`Lever API error (${res.status}) fetching board "${token}"`)
+      throw new HttpError(`Lever API error (${res.status}) fetching board "${token}"`, res.status)
     }
 
     const data = (await res.json()) as unknown

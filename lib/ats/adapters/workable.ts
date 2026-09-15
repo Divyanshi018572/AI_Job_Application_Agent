@@ -1,3 +1,4 @@
+import { HttpError } from "@/lib/http/retry"
 import type { ATSAdapter, Job, Profile, RawJob, SubmissionResult } from "@/lib/ats/types"
 
 /**
@@ -64,15 +65,15 @@ export const workableAdapter: ATSAdapter = {
     const res = await fetch(`${WORKABLE_API_BASE}/${encodeURIComponent(token)}`)
 
     if (res.status === 404) {
-      throw new Error(`Workable account not found for token "${token}"`)
+      throw new HttpError(`Workable account not found for token "${token}"`, res.status)
     }
     if (res.status === 429) {
-      throw new Error(`Workable rate limit hit while fetching account "${token}"`)
+      throw new HttpError(`Workable rate limit hit while fetching account "${token}"`, res.status)
     }
     if (!res.ok) {
-      throw new Error(
+      throw new HttpError(
         `Workable API error (${res.status}) fetching account "${token}"`
-      )
+      , res.status)
     }
 
     const data = (await res.json()) as WorkableAccountResponse

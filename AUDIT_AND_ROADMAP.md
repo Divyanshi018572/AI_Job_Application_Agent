@@ -175,8 +175,8 @@ Once Phase 0.5 is closed:
 | 1 | 1.4 Security Baseline | ☑ Done — RLS solid, storage bug fixed, two-account test passed |
 | 2 | 2.1 ATS API Integration | ☑ Done & merged — Greenhouse, Lever, and Workable adapters all implemented and tested |
 | 2 | 2.2 Company Token Discovery | ☑ Done & merged — Tavily instead of Brave Search (documented swap) |
-| 2 | 2.3 Caching & Rate Limits | ☑ Done (pending PR merge + migration applied) — jobs/companies schema, 6-hour cache, bounded-concurrency classification, ingestion API + UI |
-| 2 | 2.4 Job Classification Pipeline | ☑ Done & merged — NVIDIA NIM instead of Anthropic Claude (documented swap) |
+| 2 | 2.3 Caching & Rate Limits | ◐ ~90% — 6-hour cache, exponential backoff on 429/5xx, bounded classification concurrency, batched tagging (Session 13, pending PR + `classified_at` migration). Missing: cross-user per-platform concurrency cap (needs a job queue, e.g. Inngest) |
+| 2 | 2.4 Job Classification Pipeline | ☑ Done — NVIDIA NIM instead of Anthropic Claude (documented swap). Model retired 2026-08-26 and replaced in Session 13 with a verified primary + fallback, configurable via `NVIDIA_CLASSIFICATION_MODEL` |
 | 2 | 2.5 Company Metadata Table | ☐ Not started |
 | 3–8 | Everything else | ☐ Not started |
 
