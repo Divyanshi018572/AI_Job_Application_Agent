@@ -1,0 +1,163 @@
+name: Deploy (reusable)
+
+# Plan Tasks 0.4/0.5 — one deploy recipe shared by staging and production:
+#   config check → (opt-in) database migrations → Vercel build → deploy →
+#   smoke-test the deployed URL with the public Playwright specs.
+#
+# Called by deploy-staging.yml and deploy-production.yml; not run directly.
+# Needs the repo variables/secrets listed in docs/DEPLOYMENT.md.
+
+on:
+  workflow_call:
+    inputs:
+      github-environment:
+        description: GitHub environment holding this target's secrets/rules (staging | production)
+        type: string
+        required: true
+      vercel-environment:
+        description: Vercel environment whose variables are used (preview | production)
+        type: string
+        required: true
+      ref:
+        description: Commit SHA to deploy
+        type: string
+        required: true
+      git-branch:
+        description: Branch name, for Vercel branch-scoped preview variables
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_CLI: vercel@59.17.0
+  SUPABASE_CLI_VERSION: 2.117.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ inputs.github-environment }}
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      PROD_FLAG: ${{ inputs.vercel-environment == 'production' && '--prod' || '' }}
+      # Inputs/vars reach shell scripts only through env, never ${{ }}
+      # interpolation inside `run:` (GitHub script-injection guidance).
+      VERCEL_ENVIRONMENT: ${{ inputs.vercel-environment }}
+      GIT_BRANCH: ${{ inputs.git-branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+
+      - name: Check deploy credentials
+        run: |
+          missing=0
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!name}" ]; then echo "::error::$name is not configured (see docs/DEPLOYMENT.md)"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Pull Vercel settings and environment variables
+        run: |
+          if [ "$VERCEL_ENVIRONMENT" = "preview" ]; then
+            npx -y "$VERCEL_CLI" pull --yes --environment=preview --git-branch="$GIT_BRANCH" --token="$VERCEL_TOKEN"
+          else
+            npx -y "$VERCEL_CLI" pull --yes --environment="$VERCEL_ENVIRONMENT" --token="$VERCEL_TOKEN"
+          fi
+
+      - name: Fail-fast config check
+        run: node scripts/check-env.mjs --env-file ".vercel/.env.$VERCEL_ENVIRONMENT.local" --target "$VERCEL_ENVIRONMENT"
+
+      # Off until SUPABASE_DB_PUSH is "true" for this environment. Before
+      # enabling it, run the one-time `supabase migration repair` from
+      # docs/DEPLOYMENT.md — migrations so far were applied by hand in the SQL
+      # Editor, and `db push` would otherwise try to re-run them.
+      - name: Set up Supabase CLI
+        if: vars.SUPABASE_DB_PUSH == 'true'
+        uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Apply database migrations
+        if: vars.SUPABASE_DB_PUSH == 'true'
+        env:
+          # Session-pooler connection string (IPv4 — GitHub runners have no
+          # IPv6, and the direct db.<ref>.supabase.co host is IPv6-only).
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then echo "::error::SUPABASE_DB_URL is not configured"; exit 1; fi
+          supabase db push --dry-run --db-url "$SUPABASE_DB_URL"
+          supabase db push --db-url "$SUPABASE_DB_URL"
+
+      - name: Build
+        run: npx -y "$VERCEL_CLI" build ${PROD_FLAG:+"$PROD_FLAG"} --token="$VERCEL_TOKEN"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          url=$(npx -y "$VERCEL_CLI" deploy --prebuilt ${PROD_FLAG:+"$PROD_FLAG"} --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # Staging only: point a stable hostname (e.g. my-app-staging.vercel.app)
+      # at the newest dev deployment, so testers always have one URL.
+      - name: Alias staging hostname
+        if: inputs.vercel-environment == 'preview' && vars.STAGING_ALIAS != ''
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          STAGING_ALIAS: ${{ vars.STAGING_ALIAS }}
+        run: |
+          npx -y "$VERCEL_CLI" alias set "$DEPLOY_URL" "$STAGING_ALIAS" --token="$VERCEL_TOKEN"
+          echo "Staging alias: https://$STAGING_ALIAS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pick smoke-test URL
+        id: target
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          url="$DEPLOY_URL"
+          if [ "$VERCEL_ENVIRONMENT" = "production" ] && [ -n "$PRODUCTION_URL" ]; then
+            url="${PRODUCTION_URL%/}"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          # Vercel Deployment Protection answers 401 to anonymous requests on
+          # preview URLs. Without the bypass secret the smoke test can't get
+          # in, so say so instead of failing on a login wall.
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$url/login")
+          if [ "$status" = "401" ] && [ -z "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then
+            echo "::warning::$url is behind Vercel Deployment Protection and VERCEL_AUTOMATION_BYPASS_SECRET is not set — smoke test skipped (see docs/DEPLOYMENT.md)"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Chromium
+        if: steps.target.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Smoke-test the deployment
+        if: steps.target.outputs.run == 'true'
+        env:
+          CI: "true"
+          E2E_BASE_URL: ${{ steps.target.outputs.url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npm run test:e2e:smoke
+
+      - name: Upload smoke-test report
+        if: failure() && steps.target.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report-${{ inputs.github-environment }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

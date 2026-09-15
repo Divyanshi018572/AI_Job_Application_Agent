@@ -1,0 +1,38 @@
+name: Deploy staging
+
+# Plan Task 0.4 — every push to dev that passes CI (lint, typecheck, unit
+# tests, build, E2E) is deployed to staging (a Vercel Preview deployment).
+# Skipped until the Vercel repo variables exist; see docs/DEPLOYMENT.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # workflow_run runs with repo secrets, so only deploy CI runs from pushes
+    # to this repo's dev — never a PR (fork PRs could otherwise get code into
+    # a job that holds VERCEL_TOKEN).
+    if: >-
+      vars.VERCEL_PROJECT_ID != '' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev') ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      github-environment: staging
+      vercel-environment: preview
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      git-branch: dev
+    secrets: inherit

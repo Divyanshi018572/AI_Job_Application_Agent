@@ -1,0 +1,38 @@
+name: Deploy production
+
+# Plan Task 0.4 — gated production. Runs after CI passes on main (i.e. after
+# a dev → main PR is merged), then waits for a human to approve in the
+# "production" GitHub environment (Settings → Environments → production →
+# Required reviewers) before anything is deployed.
+# Can also be started by hand from the Actions tab, on main only.
+# Skipped until the Vercel repo variables exist; see docs/DEPLOYMENT.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      vars.VERCEL_PROJECT_ID != '' &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      github-environment: production
+      vercel-environment: production
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      git-branch: main
+    secrets: inherit
