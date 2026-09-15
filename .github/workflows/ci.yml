@@ -51,3 +51,43 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "placeholder-key"
           NEXT_PUBLIC_SITE_URL: "http://localhost:3000"
+
+  # Plan Task 0.3 — browser tests (Playwright, Chromium) against a production
+  # build. Lives in this workflow so "CI succeeded" — which gates the staging
+  # and production deploys — includes it.
+  #
+  # e2e/public always runs and needs no secrets. e2e/authenticated runs only
+  # when the E2E_* secrets exist (docs/DEPLOYMENT.md, "E2E test account");
+  # otherwise those specs skip themselves and the job stays green.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck]
+    timeout-minutes: 20
+    env:
+      # NEXT_PUBLIC_* values are inlined at build time, so the build and the
+      # test run must see the same ones. Secrets are unavailable on PRs from
+      # forks, so everything falls back to placeholders there.
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY || 'placeholder-key' }}
+      NEXT_PUBLIC_SITE_URL: "http://localhost:3100"
+      E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+      E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright
+        run: npm run test:e2e
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

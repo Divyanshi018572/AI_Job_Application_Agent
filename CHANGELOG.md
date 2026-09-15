@@ -18,6 +18,11 @@ Running record of every change made to this repo across agent sessions, kept in 
 | 8 | Apply `jobs` + repair migrations (`20260914010000`, `20260914020000`) | Manual migrations | ✅ **Done** (user-confirmed `board_token` present) |
 | 9 | Apply `supabase/migrations/20260915000000_jobs_classified_at.sql` **before** merging PR for Session 13 | Manual migrations; the new code reads `classified_at` and the jobs page will error without it | **Open** |
 | 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | **Open** |
+| 11 | Merge the Session 14 PR (`phase0/0.3-e2e-and-0.4-deploy-pipelines` → `dev`) **after** #10 | Stacked on the Session 13 branch; needs GitHub UI | **Open** |
+| 12 | Create an E2E test user + 4 `E2E_*` GitHub secrets (`docs/DEPLOYMENT.md` step 1) | Needs your Supabase dashboard + repo admin | **Open**; until then the 6 logged-in specs skip |
+| 13 | Vercel project, env vars, token; GitHub vars/secrets; `staging` + `production` environments with you as required reviewer (`docs/DEPLOYMENT.md` steps 2–4) | Account creation and secrets can't be done from agent sessions | **Open**; deploy workflows stay *skipped* until then |
+| 14 | (Optional) One-time `supabase migration repair` + `SUPABASE_DB_URL`/`SUPABASE_DB_PUSH` to automate migrations (`docs/DEPLOYMENT.md` step 5) | Needs your database password | **Optional**; supersedes row 5 |
+| 15 | Branch protection on `dev` and `main` with required checks `lint`, `typecheck`, `unit-test`, `build`, `e2e` (`docs/DEPLOYMENT.md` step 6) | Repo admin | **Open** (plan Task 0.1) |
 
 ---
 
@@ -214,10 +219,56 @@ Now primary + fallback, overridable with `NVIDIA_CLASSIFICATION_MODEL`.
 
 ---
 
+## Session 14 — E2E Browser Tests and Deploy Pipelines (Plan Tasks 0.3–0.5)
+
+Branch `phase0/0.3-e2e-and-0.4-deploy-pipelines`, stacked on the Session 13 branch. Two code commits, each verified on its own, plus this docs commit. Full setup and usage guide: **`docs/DEPLOYMENT.md`**.
+
+**E2E (0.3), commit `d8011a3`:**
+- Playwright 1.63 + Chromium. `npm run test:e2e` (starts a dev server on port 3100), `test:e2e:ui`, and `test:e2e:smoke` (public specs only).
+- `e2e/public`: landing, `/login`, `/signup` and `/forgot-password` render; all 4 dashboard pages redirect logged-out users to `/login?next=…`; `GET /api/jobs`, `POST /api/jobs/ingest`, `GET /api/profile` and `GET /api/resumes` return 401. These pin `proxy.ts` as the single auth gate and need no real Supabase.
+- `e2e/authenticated`: real login and a real `/api/jobs` 200. The jobs page flow runs with the jobs APIs mocked in the browser (fetch → "Tagged 12, 18 still untagged" → Tag more → fully tagged; failure warning; typed token kept on a 502), so it's deterministic and spends no NVIDIA credits. Skips unless `E2E_USER_EMAIL`, `E2E_USER_PASSWORD` and a real Supabase URL are set.
+- The CI workflow gained an `e2e` job (production build, then `next start`), so "CI succeeded" now includes browser tests. The deploy workflows rely on that.
+- The lockfile was regenerated with Linux npm 10 in Docker, because Windows npm drops the `@emnapi/*` entries that CI's `npm ci` needs. Verified with a clean `npm ci` in `node:22`.
+
+**Deploy pipelines (0.4/0.5), commit `4c2ce91`:**
+- `deploy-staging.yml`: after CI passes on a push to `dev`, deploys a Vercel Preview build, with an optional stable alias via `STAGING_ALIAS`.
+- `deploy-production.yml`: after CI passes on `main`, pauses for approval in the `production` GitHub environment, then deploys with `--prod`.
+- `_deploy.yml` (shared): `vercel pull`, then a fail-fast config check, opt-in `supabase db push`, `vercel build` and `vercel deploy --prebuilt`, and finally the public Playwright specs against the deployed URL, using Vercel's protection-bypass header when configured.
+- Safety:
+  - Deploys are skipped until `VERCEL_PROJECT_ID` exists.
+  - Only push-triggered CI runs from this repo can deploy, so code from a fork PR never runs next to `VERCEL_TOKEN`.
+  - Workflow inputs reach the shell only through env vars (GitHub's script-injection guidance).
+  - The Vercel and Supabase CLIs are pinned (59.17.0 / 2.117.0).
+- `scripts/check-env.mjs` (`npm run check:env`) rejects:
+  - missing or placeholder values;
+  - any `NEXT_PUBLIC_*SECRET/SERVICE_ROLE/PRIVATE*` variable;
+  - a secret or service-role key sitting in the publishable/anon slot.
+
+  It accepts Vercel "Sensitive" variables, which pull as empty, for server-only names. It prints variable names only.
+- Free-tier environment mapping: Supabase project A serves dev and staging, a new project B serves production, and Vercel Preview acts as staging. Rationale is in `docs/DEPLOYMENT.md`.
+
+**Verified:**
+- Playwright locally in dev mode and CI mode (production build + `next start`): **12 passed, 6 skipped** (the logged-in specs, no credentials).
+- Smoke mode (`E2E_BASE_URL` pointing at a separately started server): 12 passed with no server spawned.
+- `actionlint` 1.7.12 with shellcheck on all 4 workflows: clean.
+- `check-env.mjs` on 6 cases:
+  - empty env and placeholder values: exit 1;
+  - http `SITE_URL` in production, a `NEXT_PUBLIC_SERVICE_ROLE_KEY`, and a service-role JWT in the anon slot: exit 1, all 3 caught;
+  - a good config and the real `.env.local`: exit 0.
+- Supabase CLI 2.117.0 against a throwaway Postgres 16. Before the repair, `db push --dry-run` listed all 9 migrations. After `migration repair --status applied <9 versions>` it said "Remote database is up to date". This is the exact step-5 procedure, working with `--db-url` only (no `supabase link`, no access token).
+- Lint: 0 errors; the 3 warnings are pre-existing, in other components. Typecheck clean. Vitest 149/149.
+
+**Not verified here:** a real Vercel deploy and a real approval pause. There's no Vercel project or GitHub environment yet (rows 12–13). The first real run happens once you've done those steps.
+
+---
+
 ## Current Repo State (as of this entry)
 
 - `dev`: everything through Session 12. CI green.
-- Open branch: `phase2/2.3-retry-and-nim-model-fix` (Session 13) — **apply `20260915000000_jobs_classified_at.sql` first, then merge**. The GitHub default branch is now `dev`, so the PR will target the right branch.
+- Open branches, merge in this order:
+  1. `phase2/2.3-retry-and-nim-model-fix` (Session 13): **apply `20260915000000_jobs_classified_at.sql` first, then merge**.
+  2. `phase0/0.3-e2e-and-0.4-deploy-pipelines` (Session 14): stacked on 1.
 - `main`: missing everything since Session 9 — your call when to release.
+- Phase 0 (Bootstrap): CI (0.2) done; E2E (0.3), CD (0.4) and the environments/config check (0.5) are built and verified locally, and go live once the manual setup in `docs/DEPLOYMENT.md` is done. Branch protection (0.1) is still a manual step.
 - Phase 1 (Foundation & Security): **✅ complete**, tagged `v1.0-phase1-complete`.
 - Phase 2 (Core Discovery): Tasks 2.1 and 2.4 done; 2.3 done once this PR merges (the one gap vs. the plan: no cross-user per-platform concurrency limit, which needs a job queue such as Inngest); 2.2's discovery logic exists but isn't wired into the UI; 2.5 has its schema but no seed data. The 12 board tokens probed live this session are a verified starting point for 2.5's curated list.

@@ -167,7 +167,11 @@ Once Phase 0.5 is closed:
 
 | Phase | Task | Status |
 |---|---|---|
-| 0 | 0.1–0.5 (repo/CI/CD bootstrap) | ◐ CI pipeline exists (`0.2`); branch protection, CD pipelines, staged environments (`0.1`, `0.3`–`0.5`) not started |
+| 0 | 0.1 Branch protection | ☐ Manual repo-admin step; exact settings in `docs/DEPLOYMENT.md` step 6 |
+| 0 | 0.2 CI pipeline | ☑ Done: lint, typecheck, unit-test, build, e2e |
+| 0 | 0.3 E2E pipeline | ☑ Built (Session 14): Playwright, public + logged-in specs, runs in CI. The 6 logged-in specs skip until the test-account secrets exist |
+| 0 | 0.4 CD pipelines | ◐ Built and linted (Session 14): staging auto-deploy from `dev`, production gated by GitHub environment approval, post-deploy smoke tests. Goes live after the Vercel/GitHub setup in `docs/DEPLOYMENT.md` |
+| 0 | 0.5 Environments & secrets | ◐ Fail-fast config check + free-tier mapping (Supabase A = dev/staging, B = prod) done; opt-in migration automation verified. Creating project B and the secrets is manual |
 | 0.5 | Stabilization sprint (this document, items 1–12) | ☑ 12/12 done |
 | 1 | 1.1 Dashboard Layout | ☑ Done |
 | 1 | 1.2 Authentication | ☑ Done |
