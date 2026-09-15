@@ -13,7 +13,11 @@ Running record of every change made to this repo across agent sessions, kept in 
 | 3 | Manual two-account cross-tenant test (plan's Phase 1 gate) | Needs two real accounts against a live Supabase project | ✅ **Done** (user-confirmed, no leakage found) — see Session 7 |
 | 4 | Open + merge the two pending PRs (`phase1/1.3-...`, `phase2/2.1-...`) | Needs GitHub UI access | ✅ **Done** — see Session 7 for a process note on where PR #5 landed |
 | 5 | Link the Supabase CLI (`supabase link`) if you want `supabase db push` instead of hand-pasting SQL for future migrations | Needs your Supabase access token, which shouldn't be handled in chat | **Optional**, offered, not started |
-| 6 | Decide when to merge `dev` into `main` again | `main` currently has everything `dev` has (reconciled in Session 7) — no action needed until the next round of feature branches | **Your call**, not urgent right now |
+| 6 | Decide when to merge `dev` into `main` again | Release decision | **Your call** — `main` is missing everything since Session 9 |
+| 7 | Change the GitHub default branch from `main` to `dev` | Needs repo-admin access | ✅ **Done** (confirmed via GitHub API on 2026-09-15) |
+| 8 | Apply `jobs` + repair migrations (`20260914010000`, `20260914020000`) | Manual migrations | ✅ **Done** (user-confirmed `board_token` present) |
+| 9 | Apply `supabase/migrations/20260915000000_jobs_classified_at.sql` **before** merging PR for Session 13 | Manual migrations; the new code reads `classified_at` and the jobs page will error without it | **Open** |
+| 10 | Merge the Session 13 PR (`phase2/2.3-retry-and-nim-model-fix` → `dev`) | Needs GitHub UI; keeps your CodeRabbit review step | **Open** |
 
 ---
 
@@ -180,11 +184,40 @@ Also confirmed the ingestion code's `ON CONFLICT (user_id, job_url)` upsert upda
 
 ---
 
+## Session 13 — Making the Pipeline Work on Real Data
+
+The user applied the Session 12 migrations and set `NVIDIA_API_KEY`. Before building anything new, verified the pipeline against the real services — and it didn't work.
+
+**Bug 1 — the classification model was retired.** One real API call returned `410 Gone`: `meta/llama-3.3-70b-instruct` reached end of life on 2026-08-26. Because ingestion caught classifier errors, every job would have been saved untagged with no error shown. Listed the account's models and tested candidates with the real prompt; the 70B Llama/Mistral models are listed but return 404 for this account.
+
+| Model | Explicit posting | Vague posting | Reliability (6 calls) | Avg latency |
+|---|---|---|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` | ✅ correct | ✅ all null | 5/6 (one transient 503) | ~3s |
+| `openai/gpt-oss-20b` | ✅ correct | ✅ all null | 6/6 | ~7.6s |
+
+Now primary + fallback, overridable with `NVIDIA_CLASSIFICATION_MODEL`.
+
+**Bug 2 — real boards are much bigger than assumed.** Probed 12 live Greenhouse boards (all HTTP 200): Discord 44 jobs, Dropbox 39, Figma 158, Airbnb 161, Stripe 632, Cloudflare 356, Anthropic 596, Databricks 891, among others. A real classification takes 5–20s. The old design classified a whole board inside one request (many minutes for Stripe) and re-classified every job on each 6-hour refresh, against the plan's "never recomputed" rule.
+
+**What changed** (branch `phase2/2.3-retry-and-nim-model-fix`, three commits, each green on its own — 122 → 139 → 149 tests):
+- `lib/http/retry.ts` — `HttpError`, exponential backoff with cap and jitter, `withRetry`. This is Task 2.3's "exponential backoff on 429/5xx", now applied to the NIM client and all three job-board adapters. 404/410 fail fast.
+- Classifier: model fallback chain, retries on transient errors, throws when every model fails (so the failure is counted and shown), plain-text descriptions capped at 6,000 characters instead of escaped HTML.
+- Migration `20260915000000_jobs_classified_at.sql` — tracks which jobs are tagged, so a posting the model correctly left null isn't re-sent forever.
+- Ingestion saves all jobs first (chunks of 100), then tags up to 12 pending jobs per request, stopping new calls after 35s. Re-fetches never touch tag columns.
+- Jobs page: "Tag more" button, "Not tagged yet" badge, failure warning.
+- `/api/jobs` no longer ships every job's ~8.7 KB description to the browser.
+
+**Verified against real systems, not only mocks:**
+- Real pipeline code on Discord's live board + real NIM: 44 jobs fetched, 6 classified with no errors, plausible tags (manager/director roles → 5+ / Full-time; "Remote" location → Remote; unstated work mode → null).
+- Migration chain old → repair → `classified_at` → `classified_at` again on Postgres 16 + pgvector: applies cleanly and idempotently.
+- Real PostgREST: re-saving a tagged job with a new title kept `5+ / Full-time / Remote` and its `classified_at`; a new job arrived pending.
+
+---
+
 ## Current Repo State (as of this entry)
 
-- `dev`: has everything through Session 12 — Phase 1 complete, Phase 2 Tasks 2.1, 2.2, 2.4 merged, and Task 2.3's full ingestion pipeline (schema + `board_token` fix + `lib/jobs/*` + `/api/jobs*` + the jobs dashboard UI) all present and verified. CI green.
-- `main`: has everything through Session 7 (`v1.0-phase1-complete`) plus PR #8 (2.1's Lever/Workable + 2.2 discovery) — missing Task 2.4 and all of Session 11's ingestion pipeline, which only reached `dev`. Will diverge again until the default-branch fix happens or you merge `dev` into `main`.
-- No open feature branches.
-- **Action needed before the pipeline can write anything:** see Session 12 — apply the jobs migration (if not already applied), then the repair migration.
-- Phase 1 (Foundation & Security): **✅ complete**, gate passed, tagged `v1.0-phase1-complete`.
-- Phase 2 (Core Discovery): Tasks 2.1, 2.2, 2.3, 2.4 all done and merged to `dev`. Task 2.5 (company metadata table) has its schema but no seed data or ingestion-time enrichment yet.
+- `dev`: everything through Session 12. CI green.
+- Open branch: `phase2/2.3-retry-and-nim-model-fix` (Session 13) — **apply `20260915000000_jobs_classified_at.sql` first, then merge**. The GitHub default branch is now `dev`, so the PR will target the right branch.
+- `main`: missing everything since Session 9 — your call when to release.
+- Phase 1 (Foundation & Security): **✅ complete**, tagged `v1.0-phase1-complete`.
+- Phase 2 (Core Discovery): Tasks 2.1 and 2.4 done; 2.3 done once this PR merges (the one gap vs. the plan: no cross-user per-platform concurrency limit, which needs a job queue such as Inngest); 2.2's discovery logic exists but isn't wired into the UI; 2.5 has its schema but no seed data. The 12 board tokens probed live this session are a verified starting point for 2.5's curated list.
