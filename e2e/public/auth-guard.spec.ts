@@ -16,13 +16,14 @@ for (const path of ["/dashboard", "/dashboard/jobs", "/dashboard/profile", "/das
 for (const [method, path] of [
   ["GET", "/api/jobs"],
   ["POST", "/api/jobs/ingest"],
+  ["POST", "/api/companies/discover"],
   ["GET", "/api/profile"],
   ["GET", "/api/resumes"],
 ] as const) {
   test(`logged-out ${method} ${path} is rejected with 401`, async ({ request }) => {
     const res = await request.fetch(path, {
       method,
-      data: method === "POST" ? { platform: "greenhouse", boardToken: "acme" } : undefined,
+      data: method === "POST" ? { platform: "greenhouse", boardToken: "acme", companyName: "acme" } : undefined,
     })
 
     expect(res.status()).toBe(401)
