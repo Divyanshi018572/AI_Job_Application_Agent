@@ -1,11 +1,40 @@
 import { generateTextWithNvidia } from "@/lib/ai/nvidia"
 import type { RawJob } from "@/lib/ats/types"
+import { withRetry } from "@/lib/http/retry"
+import { htmlToPlainText, truncateForPrompt } from "@/lib/jobs/text"
 import {
   EMPLOYMENT_TYPES,
   EXPERIENCE_LEVELS,
   WORK_MODES,
   type JobClassification,
 } from "@/lib/jobs/types"
+
+/** Descriptions are converted to plain text and capped before prompting —
+ * enough to cover a posting's requirements section without paying for
+ * every word of benefits boilerplate on each of hundreds of jobs. */
+const MAX_DESCRIPTION_CHARS = 6000
+
+/**
+ * Models tried in order. Both were verified on 2026-09-15 against the real
+ * NIM API with this exact prompt: correct on an explicit posting, all-null
+ * on a vague one (the "don't guess" rule). nemotron-3-super averaged ~3s,
+ * gpt-oss-20b ~7.6s but went 6/6 — hence primary + fallback.
+ *
+ * NVIDIA retires hosted models on a schedule (the plan-era choice,
+ * meta/llama-3.3-70b-instruct, went end-of-life 2026-08-26 and returns
+ * 410), so NVIDIA_CLASSIFICATION_MODEL in .env.local can put a different
+ * model first without a code change.
+ */
+const DEFAULT_CLASSIFICATION_MODELS = [
+  "nvidia/nemotron-3-super-120b-a12b",
+  "openai/gpt-oss-20b",
+]
+
+export function classificationModels(): string[] {
+  const override = process.env.NVIDIA_CLASSIFICATION_MODEL?.trim()
+  if (!override) return DEFAULT_CLASSIFICATION_MODELS
+  return [override, ...DEFAULT_CLASSIFICATION_MODELS.filter((m) => m !== override)]
+}
 
 const CLASSIFICATION_PROMPT = `You are classifying a job posting into three fixed categories. Read the job title, description, and location below, then respond with ONLY a JSON object in exactly this shape — no markdown, no explanation:
 
@@ -35,8 +64,11 @@ function buildClassificationPrompt(job: RawJob): string {
     .filter(Boolean)
     .join("\n")
 
-  const description = job.description
-    ? `\n\n<untrusted_job_description>\n${job.description}\n</untrusted_job_description>`
+  const plainDescription = job.description
+    ? truncateForPrompt(htmlToPlainText(job.description), MAX_DESCRIPTION_CHARS)
+    : ""
+  const description = plainDescription
+    ? `\n\n<untrusted_job_description>\n${plainDescription}\n</untrusted_job_description>`
     : ""
 
   return `${CLASSIFICATION_PROMPT}\n\n${details}${description}`
@@ -76,12 +108,30 @@ export function normalizeClassification(raw: unknown): JobClassification {
   }
 }
 
-function cleanJsonString(raw: string): string {
+/**
+ * Parses the model's reply. Tries the whole reply first (after stripping
+ * markdown fences), then falls back to the outermost {...} span — some
+ * models put a sentence before or after the JSON even when told not to.
+ */
+function parseJsonReply(raw: string): unknown {
   let cleaned = raw.trim()
   if (cleaned.startsWith("```json")) cleaned = cleaned.replace(/^```json/, "").trim()
   else if (cleaned.startsWith("```")) cleaned = cleaned.replace(/^```/, "").trim()
   if (cleaned.endsWith("```")) cleaned = cleaned.replace(/```$/, "").trim()
-  return cleaned
+
+  try {
+    return JSON.parse(cleaned)
+  } catch {
+    const start = cleaned.indexOf("{")
+    const end = cleaned.lastIndexOf("}")
+    if (start === -1 || end <= start) throw new Error("No JSON object in reply")
+    return JSON.parse(cleaned.slice(start, end + 1))
+  }
+}
+
+export interface ClassifyDeps {
+  /** Injectable so tests don't wait on real backoff timers. */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /**
@@ -89,23 +139,54 @@ function cleanJsonString(raw: string): string {
  * cached on the row — this function itself doesn't cache anything (that's
  * the ingestion pipeline's job, Task 2.3), it's the pure "given a job,
  * return a classification" step so it's independently testable.
+ *
+ * Transient API failures (429/5xx) are retried with backoff on the same
+ * model. An unavailable model (404/410 — withRetry doesn't retry those) or
+ * exhausted retries move on to the next model in classificationModels().
+ * If every model fails, this throws —
+ * the ingestion pipeline counts those and reports them, rather than the job
+ * silently landing unclassified.
+ *
+ * A reply that arrives but isn't usable JSON is different: that's a
+ * "couldn't classify this posting" outcome, returned as all-null.
  */
-export async function classifyJob(job: RawJob): Promise<JobClassification> {
-  const responseText = await generateTextWithNvidia({
-    prompt: buildClassificationPrompt(job),
-    temperature: 0.1,
-    maxTokens: 200,
-    jsonMode: true,
-  })
+export async function classifyJob(
+  job: RawJob,
+  deps: ClassifyDeps = {}
+): Promise<JobClassification> {
+  const prompt = buildClassificationPrompt(job)
+  let lastError: unknown
 
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(cleanJsonString(responseText))
-  } catch {
-    // A malformed response is a "couldn't classify" outcome, not a crash —
-    // ingestion should still show the job, just without filter tags.
-    return { experienceLevel: null, employmentType: null, workMode: null }
+  for (const model of classificationModels()) {
+    let responseText: string
+    try {
+      responseText = await withRetry(
+        () =>
+          generateTextWithNvidia({
+            prompt,
+            model,
+            temperature: 0.1,
+            // Reasoning models spend tokens thinking before they answer; a
+            // tight cap can cut the answer off. Billing is per token used,
+            // not per token allowed.
+            maxTokens: 800,
+            jsonMode: true,
+          }),
+        { retries: 2, sleep: deps.sleep }
+      )
+    } catch (err) {
+      lastError = err
+      continue
+    }
+
+    try {
+      return normalizeClassification(parseJsonReply(responseText))
+    } catch {
+      return { experienceLevel: null, employmentType: null, workMode: null }
+    }
   }
 
-  return normalizeClassification(parsed)
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Job classification failed on every configured model")
 }
