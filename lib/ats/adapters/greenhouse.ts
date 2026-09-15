@@ -1,3 +1,4 @@
+import { HttpError } from "@/lib/http/retry"
 import type { ATSAdapter, Job, Profile, RawJob, SubmissionResult } from "@/lib/ats/types"
 
 /**
@@ -53,15 +54,15 @@ export const greenhouseAdapter: ATSAdapter = {
     )
 
     if (res.status === 404) {
-      throw new Error(`Greenhouse board not found for token "${token}"`)
+      throw new HttpError(`Greenhouse board not found for token "${token}"`, res.status)
     }
     if (res.status === 429) {
-      throw new Error(`Greenhouse rate limit hit while fetching board "${token}"`)
+      throw new HttpError(`Greenhouse rate limit hit while fetching board "${token}"`, res.status)
     }
     if (!res.ok) {
-      throw new Error(
+      throw new HttpError(
         `Greenhouse API error (${res.status}) fetching board "${token}"`
-      )
+      , res.status)
     }
 
     const data = (await res.json()) as GreenhouseJobsResponse

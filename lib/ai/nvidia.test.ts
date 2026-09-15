@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { generateTextWithNvidia } from "@/lib/ai/nvidia"
+import { DEFAULT_NVIDIA_MODEL, generateTextWithNvidia } from "@/lib/ai/nvidia"
+import { HttpError } from "@/lib/http/retry"
 
 function mockFetchOnce(response: { ok: boolean; status: number; json?: () => Promise<unknown> }) {
   vi.stubGlobal(
@@ -81,6 +82,27 @@ describe("generateTextWithNvidia", () => {
     await expect(generateTextWithNvidia({ prompt: "hi" })).rejects.toThrow(
       /NVIDIA NIM API error \(500\)/
     )
+  })
+
+  it("attaches the HTTP status so callers can tell transient from permanent failures", async () => {
+    mockFetchOnce({ ok: false, status: 410 })
+    const err = await generateTextWithNvidia({ prompt: "hi" }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HttpError)
+    expect((err as HttpError).status).toBe(410)
+  })
+
+  it("defaults to a model that is still available (not the retired llama-3.3-70b)", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ choices: [{ message: { content: "ok" } }] }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    await generateTextWithNvidia({ prompt: "hi" })
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe(DEFAULT_NVIDIA_MODEL)
+    expect(DEFAULT_NVIDIA_MODEL).not.toBe("meta/llama-3.3-70b-instruct")
   })
 
   it("throws when the response has no content", async () => {

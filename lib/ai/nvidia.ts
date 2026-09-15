@@ -1,7 +1,17 @@
+import { HttpError } from "@/lib/http/retry"
+
 export type NvidiaMessage = {
   role: "system" | "user" | "assistant"
   content: string
 }
+
+/**
+ * Default chat model. Verified callable on 2026-09-15 — NVIDIA retires
+ * hosted models on a schedule (meta/llama-3.3-70b-instruct went end-of-life
+ * 2026-08-26 and now returns 410), so callers that care should pass an
+ * explicit model, ideally from configuration (see lib/jobs/classify.ts).
+ */
+export const DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 
 export type NvidiaGenerateOptions = {
   messages?: NvidiaMessage[]
@@ -36,7 +46,7 @@ export async function generateTextWithNvidia(
     throw new Error("Missing NVIDIA_API_KEY in environment variables (.env.local)")
   }
 
-  const model = options.model || "meta/llama-3.3-70b-instruct"
+  const model = options.model || DEFAULT_NVIDIA_MODEL
   const messages: NvidiaMessage[] = []
 
   if (options.systemPrompt) {
@@ -70,7 +80,7 @@ export async function generateTextWithNvidia(
 
   if (!res.ok) {
     const errorText = await res.text()
-    throw new Error(`NVIDIA NIM API error (${res.status}): ${errorText}`)
+    throw new HttpError(`NVIDIA NIM API error (${res.status}): ${errorText}`, res.status)
   }
 
   const data = await res.json()
