@@ -48,6 +48,45 @@ export type Database = {
         }
         Relationships: []
       }
+      company_discoveries: {
+        Row: {
+          id: string
+          user_id: string
+          query: string
+          query_key: string
+          status: string
+          ats_platform: string | null
+          board_token: string | null
+          source_url: string | null
+          review_status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          query: string
+          query_key: string
+          status: string
+          ats_platform?: string | null
+          board_token?: string | null
+          source_url?: string | null
+          review_status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          query?: string
+          query_key?: string
+          status?: string
+          ats_platform?: string | null
+          board_token?: string | null
+          source_url?: string | null
+          review_status?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       jobs: {
         Row: {
           id: string
